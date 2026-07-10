@@ -6702,21 +6702,29 @@ loadFromDb()
   function daysAhead(n) { const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() + n); return d; }
   function today0() { const d = new Date(); d.setHours(0,0,0,0); return d; }
 
-  // Count booked nights that fall within [start, end) for a set of bookings
+  // Count DISTINCT booked nights within [start, end) for a set of bookings.
+  // Uses a Set keyed by day so overlapping or duplicate bookings can never
+  // push occupancy above 100% (a night is either booked or it isn't).
+  // Excludes cancelled bookings and maintenance/owner blocks.
   function bookedNights(bks, start, end) {
-    let n = 0;
+    const nights = new Set();
+    const isBlock = (typeof isRevenueBooking === 'function')
+      ? (b) => !isRevenueBooking(b)
+      : () => false;
     for (const b of bks) {
       if (b.cancelled) continue;
+      if (isBlock(b)) continue;
       const ci = pDate(b.checkIn), co = pDate(b.checkOut);
       if (!ci || !co) continue;
-      // iterate nights
       let night = new Date(ci);
       while (night < co) {
-        if (night >= start && night < end) n++;
+        if (night >= start && night < end) {
+          nights.add(night.getFullYear() * 10000 + night.getMonth() * 100 + night.getDate());
+        }
         night.setDate(night.getDate() + 1);
       }
     }
-    return n;
+    return nights.size;
   }
 
   // Average nightly price for bookings whose check-in falls within [start, end)
