@@ -6744,8 +6744,11 @@ loadFromDb()
 
   // ── Build the report rows from S.bks / S.apts ──────────────────────────────
   function buildPerfRows() {
-    const apts = (window.S && S.apts) ? S.apts : [];
-    const bks  = (window.S && S.bks)  ? S.bks  : [];
+    // S is declared with `let` at top-level, so it is NOT on window.
+    // Reference it directly via closure; guard in case it's not ready yet.
+    const _S = (typeof S !== 'undefined' && S) ? S : {};
+    const apts = _S.apts ? _S.apts : [];
+    const bks  = _S.bks  ? _S.bks  : [];
     const t = today0();
     const w15 = daysAgo(15), w30 = daysAgo(30), f7 = daysAhead(7), f30 = daysAhead(30);
 
