@@ -6732,9 +6732,9 @@ loadFromDb()
   const ALERT_RULES = {
     attiki: {
       mode: 'occupancy',
-      windows: [3, 7],          // near-term windows (days) to check
-      orange: 0.60,             // below 60% booked → orange
-      red: 0.40,                // below 40% booked → red
+      windows: [3],             // only the next 3 days matter for day-to-day units
+      orange: 0.40,             // below 40% booked → orange
+      red: 0.20,                // below 20% booked → red
     },
     nonAttiki: {
       mode: 'gap',
@@ -7150,7 +7150,7 @@ loadFromDb()
           <strong>Occ 7d/30d fwd</strong> = share of the next 7 / 30 nights already booked.
           <strong>Pace 7d/30d</strong> = forward occupancy vs the portfolio average (↑ ahead, ↓ behind, in points).
           <strong>ADR</strong> arrow (30d) = current vs prior 30-day avg price (≥3 bookings each side).
-          <br><strong>Vacancy alerts</strong> — <span style="color:#C9A84C">◆</span> Attiki (day-to-day): judged on near-term fill — next 3d or 7d below 60% booked = <span style="color:#d68910">orange</span>, below 40% = <span style="color:#c0392b">red</span> (badge shows the % booked). Non-Attiki (longer stays): <span style="color:#d68910">orange</span> = 3+ empty nights in next 15d, <span style="color:#c0392b">red</span> = 10+ in next 20d. Red overrides orange.
+          <br><strong>Vacancy alerts</strong> — <span style="color:#C9A84C">◆</span> Attiki (day-to-day): judged on next-3-day fill — below 40% booked = <span style="color:#d68910">orange</span>, below 20% = <span style="color:#c0392b">red</span> (badge shows the % booked). Non-Attiki (longer stays): <span style="color:#d68910">orange</span> = 3+ empty nights in next 15d, <span style="color:#c0392b">red</span> = 10+ in next 20d. Red overrides orange.
           Click any header to sort. Auto-syncs every 2h.
         </div>`}
       </div>`;
