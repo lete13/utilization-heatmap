@@ -206,6 +206,18 @@ app.get('/api/db/data', async (req, res) => {
   }
 });
 
+// GET /api/history — rolling per-property daily snapshots for trend detection
+app.get('/api/history', async (req, res) => {
+  if (!pool) return res.json([]);
+  try {
+    const r = await pool.query("SELECT data FROM app_data WHERE key = 'history'");
+    res.json(Array.isArray(r.rows[0]?.data) ? r.rows[0].data : []);
+  } catch (e) {
+    console.error('[history] read error:', e.message);
+    res.json([]);
+  }
+});
+
 // POST /api/db/data — save the full app state to PostgreSQL
 // SERVER-SIDE DATA PROTECTION: never allow overwriting real data with empty state
 app.post('/api/db/data', async (req, res) => {
@@ -269,6 +281,10 @@ app.post('/api/db/data', async (req, res) => {
       ['main', JSON.stringify(payload)]
     );
     const ts = await pool.query("SELECT updated_at FROM app_data WHERE key = 'main'");
+    // Also capture a trend snapshot from the saved data (covers manual refresh).
+    if (Array.isArray(payload.bks) && payload.bks.length) {
+      await saveSnapshot(pool, payload.bks, payload.apts || []);
+    }
     res.json({ ok: true, savedAt: ts.rows[0]?.updated_at });
   } catch(e) {
     console.error('[db] write error:', e.message);
@@ -309,6 +325,102 @@ app.all('/api/hosthub/*', async (req, res) => {
     res.status(r.status).set('Content-Type', 'application/json').send(text);
   } catch(e) { res.status(502).json({ error: e.message }); }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SNAPSHOT HISTORY (for trend / deterioration detection)
+// Stores one compact dated snapshot per property per day in app_data key='history'.
+// Rolling window (HISTORY_MAX_DAYS) so it never grows unbounded.
+// ─────────────────────────────────────────────────────────────────────────────
+const HISTORY_MAX_DAYS = 60;
+
+function snapParseD(v) {
+  if (!v) return null;
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return new Date(`${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}T00:00:00`);
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+
+function snapBookedNights(bks, start, end) {
+  const nights = new Set();
+  for (const b of bks) {
+    if (b.cancelled) continue;
+    const ci = snapParseD(b.checkIn), co = snapParseD(b.checkOut);
+    if (!ci || !co) continue;
+    let night = new Date(ci);
+    while (night < co) {
+      if (night >= start && night < end) {
+        nights.add(night.getFullYear() * 10000 + night.getMonth() * 100 + night.getDate());
+      }
+      night.setDate(night.getDate() + 1);
+    }
+  }
+  return nights.size;
+}
+
+function snapAvgAdr(bks, start, end) {
+  const vals = [];
+  for (const b of bks) {
+    if (b.cancelled) continue;
+    const ci = snapParseD(b.checkIn);
+    if (!ci || ci < start || ci >= end) continue;
+    const nights = parseInt(b.nights) || 1;
+    const total = (typeof b.payout === 'number' && b.payout) ? b.payout
+                : (typeof b.gross === 'number' ? b.gross : null);
+    if (total != null && nights) vals.push(total / nights);
+  }
+  if (!vals.length) return null;
+  return Math.round((vals.reduce((a, v) => a + v, 0) / vals.length) * 100) / 100;
+}
+
+function buildSnapshot(bookings, rentals) {
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const ahead = (n) => { const d = new Date(t); d.setDate(d.getDate() + n); return d; };
+  const byApt = {};
+  for (const b of bookings) {
+    const key = b.aptId || b.aptName || '—';
+    (byApt[key] = byApt[key] || []).push(b);
+  }
+  const list = (rentals && rentals.length)
+    ? rentals.map(r => ({ id: r.id, name: r.name }))
+    : Object.keys(byApt).map(k => ({ id: k, name: k }));
+  const dateStr = t.toISOString().slice(0, 10);
+  const props = list.map(apt => {
+    const set = byApt[apt.id] || byApt[apt.name] || [];
+    return {
+      id: apt.id,
+      occ7:  +(snapBookedNights(set, t, ahead(7)) / 7).toFixed(4),
+      occ14: +(snapBookedNights(set, t, ahead(14)) / 14).toFixed(4),
+      occ30: +(snapBookedNights(set, t, ahead(30)) / 30).toFixed(4),
+      bn30:  snapBookedNights(set, t, ahead(30)),
+      adr30: snapAvgAdr(set, ahead(-30), t),
+    };
+  });
+  return { date: dateStr, props };
+}
+
+async function saveSnapshot(pool, bookings, rentals) {
+  if (!pool) return;
+  try {
+    const snap = buildSnapshot(bookings, rentals);
+    const existing = await pool.query("SELECT data FROM app_data WHERE key = 'history'").catch(() => ({ rows: [] }));
+    let hist = existing.rows[0]?.data;
+    if (!Array.isArray(hist)) hist = [];
+    hist = hist.filter(s => s.date !== snap.date);   // last sync of the day wins
+    hist.push(snap);
+    hist.sort((a, b) => a.date.localeCompare(b.date));
+    if (hist.length > HISTORY_MAX_DAYS) hist = hist.slice(hist.length - HISTORY_MAX_DAYS);
+    await pool.query(
+      `INSERT INTO app_data (key, data) VALUES ('history', $1::jsonb)
+       ON CONFLICT (key) DO UPDATE SET data = $1::jsonb, updated_at = NOW()`,
+      [JSON.stringify(hist)]
+    );
+    console.log(`[snapshot] saved ${snap.props.length} props for ${snap.date} (history: ${hist.length} days)`);
+  } catch (e) {
+    console.error('[snapshot] save error:', e.message);
+  }
+}
 
 // ── Full Hosthub Sync ─────────────────────────────────────────────────────────
 // ── Core sync function (shared by HTTP endpoint + auto-scheduler) ─────────────
@@ -496,27 +608,6 @@ function mergeApts(existing, rentals) {
 }
 
 // ── Auto-sync scheduler (every 2 hours: 00:00, 02:00, 04:00 ... 22:00) ───────
-// ── Resolve a Hosthub API key stored in the DB (fallback when no env var) ──────
-// The frontend persists the user's key inside app_data key='main' under
-// meta.hosthubApiKey (or hh_api_key). This lets auto-sync work even when
-// HOSTHUB_API_KEY isn't set as an environment variable.
-async function getStoredApiKey() {
-  if (!pool) return null;
-  try {
-    const r = await pool.query("SELECT data FROM app_data WHERE key = 'main'");
-    const d = r.rows[0]?.data || {};
-    return (
-      (d.meta && (d.meta.hosthubApiKey || d.meta.hh_api_key || d.meta.apiKey)) ||
-      d.hosthubApiKey ||
-      d.hh_api_key ||
-      null
-    );
-  } catch (e) {
-    console.error('[auto-sync] getStoredApiKey error:', e.message);
-    return null;
-  }
-}
-
 function scheduleAutoSync() {
   const now   = new Date();
   const hh    = now.getHours();
@@ -578,6 +669,7 @@ function scheduleAutoSync() {
           ['main', JSON.stringify(merged)]
         );
         console.log(`[auto-sync] ✓ Done — ${result.bookings.length} bookings saved at ${started.toISOString()}`);
+        await saveSnapshot(pool, result.bookings, result.rentals);
       } else if (result.error) {
         console.error('[auto-sync] Sync error:', result.error);
       }
