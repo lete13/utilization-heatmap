@@ -6692,18 +6692,34 @@ loadFromDb()
   let _perfTimer = null;
   let _perfLastRun = null;
 
-  // ── CONFIG: Attiki apartments (Athens / Piraeus region) ─────────────────────
-  // Paste the EXACT property names (as they appear in the table) that are in
-  // Attiki. Apartments NOT in this list are treated as "outside Attiki"
-  // (e.g. Thessaloniki) and use the other alert thresholds. Case-insensitive.
-  const ATTIKI_APARTMENTS = [
-    // "Acropolis Skyline Sunset",
-    // "Athens Unity Apartment",
-    // "Votsala 5 Luxury Studio with Balcony in Piraeus",
-    // ...add your Attiki (Athens/Piraeus) property names here
+  // ── CONFIG: Non-Attiki apartments (Thessaloniki, islands, villas, etc.) ─────
+  // List the properties that are NOT in Attiki. Everything else is treated as
+  // Attiki (day-to-day short-stay). Matching is "contains": a property counts
+  // as non-Attiki if its name CONTAINS any fragment below (case-insensitive,
+  // whitespace-normalised). Keep fragments distinctive to avoid false matches.
+  const NON_ATTIKI_APARTMENTS = [
+    "ariti 7",
+    "ariti7",
+    "eclectic",
+    "elysian cornerstone",
+    "elysian hightower",
+    "le alex",
+    "le floor",
+    "le grace",
+    "le plaza",
+    "seaside lavrio",
+    "sunset nest in fiskardo",
+    "the skarlatos residence",
+    "villa liberty",
+    "p & g apartment",
   ];
-  const _attikiSet = new Set(ATTIKI_APARTMENTS.map(s => s.trim().toLowerCase()));
-  function isAttiki(name) { return _attikiSet.has(String(name || '').trim().toLowerCase()); }
+  const _norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const _nonAttikiFrags = NON_ATTIKI_APARTMENTS.map(_norm).filter(Boolean);
+  function isAttiki(name) {
+    const n = _norm(name);
+    // non-Attiki if it contains any listed fragment; otherwise it's Attiki
+    return !_nonAttikiFrags.some(frag => n.includes(frag));
+  }
 
   // Alert rules.
   //  • Attiki (day-to-day, short-stay): judged on NEAR-TERM OCCUPANCY, not gaps.
