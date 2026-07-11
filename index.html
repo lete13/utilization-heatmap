@@ -6752,20 +6752,24 @@ loadFromDb()
   }
 
   // Average nightly price for bookings whose check-in falls within [start, end)
-  function avgNightlyPrice(bks, start, end) {
+  // Returns { avg, count } so callers can gate on sample size.
+  function avgNightlyPriceInfo(bks, start, end) {
     const vals = [];
     for (const b of bks) {
       if (b.cancelled) continue;
+      if (typeof isRevenueBooking === 'function' && !isRevenueBooking(b)) continue;
       const ci = pDate(b.checkIn);
       if (!ci || ci < start || ci >= end) continue;
       const nights = parseInt(b.nights) || nightsBetween(b.checkIn, b.checkOut) || 1;
-      // Prefer payout, fall back to gross; per-night
       const total = (typeof b.payout === 'number' && b.payout) ? b.payout
                   : (typeof b.gross === 'number' ? b.gross : null);
       if (total != null && nights) vals.push(total / nights);
     }
-    if (!vals.length) return null;
-    return vals.reduce((a, v) => a + v, 0) / vals.length;
+    if (!vals.length) return { avg: null, count: 0 };
+    return { avg: vals.reduce((a, v) => a + v, 0) / vals.length, count: vals.length };
+  }
+  function avgNightlyPrice(bks, start, end) {
+    return avgNightlyPriceInfo(bks, start, end).avg;
   }
 
   function nightsBetween(ci, co) {
@@ -6838,18 +6842,27 @@ loadFromDb()
       const set = byApt[apt.id] || byApt[apt.name] || [];
       const name = apt.name || apt.id;
 
-      // Occupancy
+      // Forward occupancy
+      const occ7fwd  = bookedNights(set, t, f7) / 7;
       const occ30fwd = bookedNights(set, t, f30) / 30;
-      // Booking pace: expected = how the prior comparable 30-day window actually
-      // filled (days 31–60 ago). Current = next-30-day booked occupancy.
-      const occExpected = bookedNights(set, w60, w30) / 30;
-      const paceDelta = (occExpected > 0 || occ30fwd > 0) ? (occ30fwd - occExpected) : null;
 
-      // ADR: current 30d vs prior 30d (days 31–60 ago)
-      const price30 = avgNightlyPrice(set, w30, t);
-      const pricePrev30 = avgNightlyPrice(set, w60, w30);
-      const adrChange = (price30 != null && pricePrev30 != null && pricePrev30 > 0)
-        ? (price30 - pricePrev30) / pricePrev30 : null;
+      // Prior completed window: days 31–60 ago = [w60, w30)
+      // Expected uses the SAME span length as the forward window it's compared to.
+      const expPrior30 = bookedNights(set, w60, w30) / 30;       // 30-night span
+      // For the 7d pace, use the first 7 nights of that prior window as the comparable slice
+      const w60plus7 = new Date(w60); w60plus7.setDate(w60plus7.getDate() + 7);
+      const expPrior7 = bookedNights(set, w60, w60plus7) / 7;    // 7-night span
+
+      const pace7  = (expPrior7  > 0 || occ7fwd  > 0) ? (occ7fwd  - expPrior7)  : null;
+      const pace30 = (expPrior30 > 0 || occ30fwd > 0) ? (occ30fwd - expPrior30) : null;
+
+      // ADR: current 30d vs prior 30d, gated on sample size (>=2 bookings each side)
+      const cur = avgNightlyPriceInfo(set, w30, t);
+      const prev = avgNightlyPriceInfo(set, w60, w30);
+      const price30 = cur.avg;
+      const adrChange = (cur.avg != null && prev.avg != null && prev.avg > 0
+                          && cur.count >= 2 && prev.count >= 2)
+        ? (cur.avg - prev.avg) / prev.avg : null;
 
       // Athens empty-gap alert (next 30 days)
       let gapAlert = null;
@@ -6862,10 +6875,12 @@ loadFromDb()
         name,
         occ15:   bookedNights(set, w15, t) / 15,
         occ30:   bookedNights(set, w30, t) / 30,
-        occ7fwd: bookedNights(set, t, f7) / 7,
+        occ7fwd,
         occ30fwd,
-        occExpected,
-        paceDelta,
+        expPrior7,
+        expPrior30,
+        pace7,
+        pace30,
         price15: avgNightlyPrice(set, w15, t),
         price30,
         adrChange,
@@ -6927,20 +6942,16 @@ loadFromDb()
     </div>`;
   }
 
-  // Booking-pace cell: current fwd occ, expected under it, and the gap chip
-  function paceCell(cur, expected, delta) {
-    const curTxt = pct(cur);
-    const expTxt = pct(expected);
-    let chip = '';
-    if (delta != null) {
-      const p = Math.round(delta * 100);
-      const up = p >= 0;
-      const col = up ? '#1a7a4a' : '#c0392b';
-      chip = `<span style="font-size:11px;font-weight:600;color:${col}">${up ? '↑' : '↓'}${Math.abs(p)}%</span>`;
-    }
-    return `<div style="line-height:1.35">
-      <div class="mono" style="font-weight:600">${curTxt} ${chip}</div>
-      <div style="font-size:10px;color:var(--tx3)">exp ${expTxt}</div>
+  // Booking-pace cell: shows the ↑/↓ delta with the expected baseline under it.
+  function paceChip(delta, expected) {
+    if (delta == null) return '<span style="color:var(--tx3)">—</span>';
+    const p = Math.round(delta * 100);
+    const up = p >= 0;
+    const col = up ? '#1a7a4a' : '#c0392b';
+    const arrow = up ? '↑' : '↓';
+    return `<div style="line-height:1.3">
+      <div class="mono" style="font-weight:600;color:${col}">${arrow}${Math.abs(p)}%</div>
+      <div style="font-size:10px;color:var(--tx3)">exp ${pct(expected)}</div>
     </div>`;
   }
 
@@ -6954,9 +6965,9 @@ loadFromDb()
     const priced = rows.filter(r => r.price30 != null);
     const avgPrice = priced.length ? priced.reduce((a, r) => a + r.price30, 0) / priced.length : 0;
     const highOcc = rows.filter(r => (r.occ30 || 0) >= 0.8).length;
-    // Portfolio booking pace: avg current fwd vs avg expected
+    // Portfolio booking pace: avg current fwd vs avg expected (30d)
     const avgFwd = rows.length ? rows.reduce((a, r) => a + (r.occ30fwd || 0), 0) / rows.length : 0;
-    const avgExp = rows.length ? rows.reduce((a, r) => a + (r.occExpected || 0), 0) / rows.length : 0;
+    const avgExp = rows.length ? rows.reduce((a, r) => a + (r.expPrior30 || 0), 0) / rows.length : 0;
     const pacePortfolio = avgExp > 0 ? (avgFwd - avgExp) : null;
     // Athens gap alerts
     const alertRows = rows.filter(r => r.gapAlert);
@@ -7009,7 +7020,9 @@ loadFromDb()
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ15')">Occ 15d${sortArrow('occ15')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ30')">Occ 30d${sortArrow('occ30')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ7fwd')">Occ 7d fwd${sortArrow('occ7fwd')}</th>
-                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ30fwd')">Booking Pace${sortArrow('occ30fwd')}</th>
+                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ30fwd')">Occ 30d fwd${sortArrow('occ30fwd')}</th>
+                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('pace7')" title="Next 7 days vs the comparable 7-day slice 31–60 days ago">Pace 7d${sortArrow('pace7')}</th>
+                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('pace30')" title="Next 30 days vs days 31–60 ago">Pace 30d${sortArrow('pace30')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('price15')">ADR 15d${sortArrow('price15')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('price30')">ADR 30d${sortArrow('price30')}</th>
               </tr></thead>
@@ -7020,7 +7033,9 @@ loadFromDb()
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
                     <td class="r mono">${pct(r.occ7fwd)}</td>
-                    <td class="r">${paceCell(r.occ30fwd, r.occExpected, r.paceDelta)}</td>
+                    <td class="r mono">${pct(r.occ30fwd)}</td>
+                    <td class="r">${paceChip(r.pace7, r.expPrior7)}</td>
+                    <td class="r">${paceChip(r.pace30, r.expPrior30)}</td>
                     <td class="r">${priceCell(r.price15, null)}</td>
                     <td class="r">${priceCell(r.price30, r.adrChange)}</td>
                   </tr>`).join('')}
@@ -7029,10 +7044,11 @@ loadFromDb()
           </div>
         </div>
         <div style="font-size:11px;color:var(--tx3);margin-top:10px;line-height:1.6">
-          <strong>Booking Pace</strong> = next-30-day occupancy vs what the prior comparable window (days 31–60 ago) actually filled.
-          <strong>ADR</strong> arrow = current 30d avg price vs prior 30 days.
-          <strong>◆</strong> marks Athens properties; <strong style="color:#c0392b">⚠</strong> flags 3+ consecutive empty nights in the next 30 days.
-          Click any column header to sort. Data auto-syncs from Hosthub every 2h.
+          <strong>Occ 7d/30d fwd</strong> = share of the next 7 / 30 nights already booked.
+          <strong>Pace 7d/30d</strong> = that forward occupancy minus what the comparable window 31–60 days ago actually filled (↑ ahead of last month's pace, ↓ behind); "exp" is that prior baseline.
+          <strong>ADR</strong> arrow (30d) = current vs prior 30-day avg price, shown only when both periods have ≥2 bookings.
+          <strong>◆</strong> = Athens; <strong style="color:#c0392b">⚠</strong> = 3+ empty nights in the next 30 days.
+          Click any header to sort. Auto-syncs every 2h.
         </div>`}
       </div>`;
   }
@@ -7080,7 +7096,7 @@ loadFromDb()
     if (typeof XLSX === 'undefined') { if (typeof toast==='function') toast('XLSX library not loaded.','err'); return; }
     const rows = buildPerfRows();
     const aoa = [
-      ['Property', 'Athens', 'Occ 15d', 'Occ 30d', 'Occ 7d fwd', 'Booking Pace (fwd 30d)', 'Expected (prior)', 'Pace Δ', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Gap Alert (nights)'],
+      ['Property', 'Athens', 'Occ 15d', 'Occ 30d', 'Occ 7d fwd', 'Occ 30d fwd', 'Pace 7d', 'Exp 7d', 'Pace 30d', 'Exp 30d', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Gap Alert (nights)'],
       ...rows.map(r => [
         r.name,
         r.isAthens ? 'Yes' : '',
@@ -7088,8 +7104,10 @@ loadFromDb()
         r.occ30 != null ? +(r.occ30).toFixed(4) : '',
         r.occ7fwd != null ? +(r.occ7fwd).toFixed(4) : '',
         r.occ30fwd != null ? +(r.occ30fwd).toFixed(4) : '',
-        r.occExpected != null ? +(r.occExpected).toFixed(4) : '',
-        r.paceDelta != null ? +(r.paceDelta).toFixed(4) : '',
+        r.pace7 != null ? +(r.pace7).toFixed(4) : '',
+        r.expPrior7 != null ? +(r.expPrior7).toFixed(4) : '',
+        r.pace30 != null ? +(r.pace30).toFixed(4) : '',
+        r.expPrior30 != null ? +(r.expPrior30).toFixed(4) : '',
         r.price15 != null ? +(r.price15).toFixed(2) : '',
         r.price30 != null ? +(r.price30).toFixed(2) : '',
         r.adrChange != null ? +(r.adrChange).toFixed(4) : '',
@@ -7098,13 +7116,13 @@ loadFromDb()
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const range = XLSX.utils.decode_range(ws['!ref']);
-    const pctCols = [2, 3, 4, 5, 6, 7, 10];   // occupancy + pace delta + adr change
-    const eurCols = [8, 9];                     // ADR prices
+    const pctCols = [2, 3, 4, 5, 6, 7, 8, 9, 12];   // occupancy + pace + expected + adr change
+    const eurCols = [10, 11];                         // ADR prices
     for (let R = 1; R <= range.e.r; R++) {
       pctCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '0%'; });
       eurCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '€#,##0.00'; });
     }
-    ws['!cols'] = [{ wch: 32 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 16 }, { wch: 14 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 16 }];
+    ws['!cols'] = [{ wch: 32 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 8 }, { wch: 9 }, { wch: 8 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 16 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Performance');
     const d = new Date().toISOString().slice(0, 10);
