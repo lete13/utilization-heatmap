@@ -7422,24 +7422,21 @@ loadFromDb()
   // The server already auto-syncs Hosthub every 2h into Postgres. "Refresh now"
   // pulls the latest synced data from the DB (and can trigger a fresh sync).
   window.perfRefresh = async function (manual) {
-    const key = localStorage.getItem('hh_api_key');
-
     if (manual) {
-      // Optionally trigger a brand-new server-side Hosthub sync, then reload.
-      // /api/sync exists on the server and re-pulls from Hosthub.
-      try {
-        if (typeof toast === 'function') toast('Syncing from Hosthub…');
-        await fetch('/api/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(key ? { api_key: key } : {}),
-        });
-      } catch (e) { /* server may use its own env key / be busy — fall through */ }
-    }
-
-    // Pull the freshest data the server has into S.bks, then recompute.
-    if (typeof window.loadFromDb === 'function') {
-      try { await window.loadFromDb(); } catch (e) { /* ignore, recompute anyway */ }
+      // Use the app's OWN sync routine — it calls /api/sync, reads the streamed
+      // result, saves it to the DB, and updates S.bks. (Calling /api/sync
+      // directly here would re-pull from Hosthub but discard the stream, leaving
+      // the DB — and this tab — on stale data.)
+      if (typeof window.startSync === 'function') {
+        try { await window.startSync(); } catch (e) { /* fall through to DB reload */ }
+      } else if (typeof window.loadFromDb === 'function') {
+        try { await window.loadFromDb(); } catch (e) {}
+      }
+    } else {
+      // Non-manual: just pull the freshest data the server already has.
+      if (typeof window.loadFromDb === 'function') {
+        try { await window.loadFromDb(); } catch (e) {}
+      }
     }
     await loadPerfHistory();
     renderPerf();
