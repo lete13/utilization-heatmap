@@ -7491,11 +7491,11 @@ loadFromDb()
 
     // ── Gridlines: occupancy every 25% (left), ADR denser every ~1/6 (right) ──
     let grid = '';
-    for (let g = 0; g <= 4; g++) {          // occupancy axis (left) 0/25/50/75/100
-      const yv = g / 4;
+    for (let g = 0; g <= 20; g++) {          // occupancy axis (left) every 5%
+      const yv = g / 20;
       const y = yOcc(yv);
       grid += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#2a3245" stroke-width="1"/>`;
-      grid += `<text x="${padL - 8}" y="${y + 3}" text-anchor="end" font-size="10" fill="#8890a8">${Math.round(yv * 100)}%</text>`;
+      grid += `<text x="${padL - 8}" y="${y + 3}" text-anchor="end" font-size="9" fill="#8890a8">${Math.round(yv * 100)}%</text>`;
     }
     for (let g = 0; g <= 6; g++) {          // ADR axis (right) — denser, 7 labels
       const yv = g / 6;
