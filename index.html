@@ -6705,11 +6705,26 @@ loadFromDb()
   const _attikiSet = new Set(ATTIKI_APARTMENTS.map(s => s.trim().toLowerCase()));
   function isAttiki(name) { return _attikiSet.has(String(name || '').trim().toLowerCase()); }
 
-  // Alert rules. Each: window (days ahead to scan) + gap (consecutive empty
-  // nights that trigger). Red takes priority over orange when both fire.
+  // Alert rules.
+  //  • Attiki (day-to-day, short-stay): judged on NEAR-TERM OCCUPANCY, not gaps.
+  //    A healthy churn unit always has scattered 1–2 night holes, so a gap check
+  //    mis-flags them. Instead: is enough of the next few days booked?
+  //    Checks both a 3-day and 7-day window; the worse result decides.
+  //    (occ below `red` %  → red;  below `orange` %  → orange)
+  //  • Non-Attiki (longer stays): judged on CONSECUTIVE EMPTY NIGHTS (gaps),
+  //    because a real multi-night hole is the meaningful signal there.
   const ALERT_RULES = {
-    attiki:    { orange: { window: 7,  gap: 3 }, red: { window: 15, gap: 5 } },
-    nonAttiki: { orange: { window: 15, gap: 3 }, red: { window: 20, gap: 10 } },
+    attiki: {
+      mode: 'occupancy',
+      windows: [3, 7],          // near-term windows (days) to check
+      orange: 0.60,             // below 60% booked → orange
+      red: 0.40,                // below 40% booked → red
+    },
+    nonAttiki: {
+      mode: 'gap',
+      orange: { window: 15, gap: 3 },
+      red: { window: 20, gap: 10 },
+    },
   };
 
   // ── Sort state (default: name A→Z) ──────────────────────────────────────────
@@ -6819,21 +6834,53 @@ loadFromDb()
     return { maxGap, firstGapStart };
   }
 
-  // Evaluate a property's alert level based on its Attiki status and the rules.
-  // Returns { level: 'red'|'orange'|null, nights, from, scope }.
+  // Evaluate a property's alert level.
+  // Attiki → near-term occupancy thresholds. Non-Attiki → consecutive-gap.
+  // Returns { level, mode, detail } where detail carries the triggering info.
   function evalAlert(bks, name) {
     const t = today0();
-    const rules = isAttiki(name) ? ALERT_RULES.attiki : ALERT_RULES.nonAttiki;
-    // Red first (more severe wins)
+    if (isAttiki(name)) {
+      const rules = ALERT_RULES.attiki;
+      // occupancy in each near-term window; the LOWEST fill decides severity
+      let worst = { occ: Infinity, window: null };
+      rules.windows.forEach(w => {
+        const occ = bookedNights(bks, t, daysAhead(w)) / w;
+        if (occ < worst.occ) worst = { occ, window: w };
+      });
+      if (worst.occ < rules.red) {
+        return { level: 'red', mode: 'occupancy', occ: worst.occ, window: worst.window };
+      }
+      if (worst.occ < rules.orange) {
+        return { level: 'orange', mode: 'occupancy', occ: worst.occ, window: worst.window };
+      }
+      return { level: null, mode: 'occupancy', occ: worst.occ, window: worst.window };
+    }
+    // Non-Attiki: gap-based (red wins)
+    const rules = ALERT_RULES.nonAttiki;
     const red = longestGap(bks, t, daysAhead(rules.red.window));
     if (red.maxGap >= rules.red.gap) {
-      return { level: 'red', nights: red.maxGap, from: red.firstGapStart, scope: rules.red };
+      return { level: 'red', mode: 'gap', nights: red.maxGap, from: red.firstGapStart };
     }
     const orange = longestGap(bks, t, daysAhead(rules.orange.window));
     if (orange.maxGap >= rules.orange.gap) {
-      return { level: 'orange', nights: orange.maxGap, from: orange.firstGapStart, scope: rules.orange };
+      return { level: 'orange', mode: 'gap', nights: orange.maxGap, from: orange.firstGapStart };
     }
-    return { level: null };
+    return { level: null, mode: 'gap' };
+  }
+
+  // Human-readable description of an alert for banners/tooltips.
+  function alertLabel(a) {
+    if (!a || !a.level) return '';
+    if (a.mode === 'occupancy') {
+      return `${Math.round(a.occ * 100)}% booked next ${a.window}d`;
+    }
+    return `${a.nights} empty nights${a.from ? ' from ' + a.from.toLocaleDateString() : ''}`;
+  }
+  // Short badge text next to the property name.
+  function alertBadge(a) {
+    if (!a || !a.level) return '';
+    if (a.mode === 'occupancy') return `${Math.round(a.occ * 100)}%`;
+    return `⚠${a.nights}`;
   }
 
   // ── Build the report rows from S.bks / S.apts ──────────────────────────────
@@ -7031,7 +7078,7 @@ loadFromDb()
             <div style="font-size:11px;font-weight:600;color:#c0392b;margin-bottom:4px">RED — critical</div>
             <div style="display:flex;flex-wrap:wrap;gap:8px">
               ${redRows.map(r => `<span style="font-size:11px;background:rgba(192,57,43,.12);border:1px solid rgba(192,57,43,.35);border-radius:12px;padding:3px 10px">
-                <strong>${r.name}</strong> · ${r.alert.nights} empty nights${r.alert.from ? ' from ' + r.alert.from.toLocaleDateString() : ''}
+                <strong>${r.name}</strong> · ${alertLabel(r.alert)}
               </span>`).join('')}
             </div>
           </div>` : ''}
@@ -7040,7 +7087,7 @@ loadFromDb()
             <div style="font-size:11px;font-weight:600;color:#d68910;margin-bottom:4px">ORANGE — watch</div>
             <div style="display:flex;flex-wrap:wrap;gap:8px">
               ${orangeRows.map(r => `<span style="font-size:11px;background:rgba(214,137,16,.12);border:1px solid rgba(214,137,16,.35);border-radius:12px;padding:3px 10px">
-                <strong>${r.name}</strong> · ${r.alert.nights} empty nights${r.alert.from ? ' from ' + r.alert.from.toLocaleDateString() : ''}
+                <strong>${r.name}</strong> · ${alertLabel(r.alert)}
               </span>`).join('')}
             </div>
           </div>` : ''}
@@ -7068,7 +7115,7 @@ loadFromDb()
               <tbody>
                 ${rows.map(r => `
                   <tr${r.alert && r.alert.level === 'red' ? ' style="background:rgba(192,57,43,.09)"' : r.alert && r.alert.level === 'orange' ? ' style="background:rgba(214,137,16,.09)"' : ''}>
-                    <td style="font-weight:500">${r.isAttiki ? '<span title="Attiki (Athens/Piraeus)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.alert && r.alert.level ? ` <span title="${r.alert.nights} empty nights ahead" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">⚠${r.alert.nights}</span>` : ''}</td>
+                    <td style="font-weight:500">${r.isAttiki ? '<span title="Attiki (Athens/Piraeus)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}</td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
                     <td class="r mono">${pct(r.occ7fwd)}</td>
@@ -7087,7 +7134,7 @@ loadFromDb()
           <strong>Occ 7d/30d fwd</strong> = share of the next 7 / 30 nights already booked.
           <strong>Pace 7d/30d</strong> = forward occupancy vs the portfolio average (↑ ahead, ↓ behind, in points).
           <strong>ADR</strong> arrow (30d) = current vs prior 30-day avg price (≥3 bookings each side).
-          <br><strong>Vacancy alerts</strong> — <span style="color:#C9A84C">◆</span> Attiki (Athens/Piraeus): <span style="color:#d68910">orange</span> = 3+ empty nights in next 7 days, <span style="color:#c0392b">red</span> = 5+ in next 15 days. Non-Attiki: <span style="color:#d68910">orange</span> = 3+ empty nights in next 15 days, <span style="color:#c0392b">red</span> = 10+ in next 20 days. Red overrides orange.
+          <br><strong>Vacancy alerts</strong> — <span style="color:#C9A84C">◆</span> Attiki (day-to-day): judged on near-term fill — next 3d or 7d below 60% booked = <span style="color:#d68910">orange</span>, below 40% = <span style="color:#c0392b">red</span> (badge shows the % booked). Non-Attiki (longer stays): <span style="color:#d68910">orange</span> = 3+ empty nights in next 15d, <span style="color:#c0392b">red</span> = 10+ in next 20d. Red overrides orange.
           Click any header to sort. Auto-syncs every 2h.
         </div>`}
       </div>`;
@@ -7163,7 +7210,10 @@ loadFromDb()
       // Colour matches the property's overall alert level (red/orange).
       const alertIdx = new Set();
       const rules = isAttiki(r.name) ? ALERT_RULES.attiki : ALERT_RULES.nonAttiki;
-      // scan for red-qualifying runs within red.window, orange within orange.window
+      const alertColor = (r.alert && r.alert.level === 'red') ? '#7a2f2f'
+                       : (r.alert && r.alert.level === 'orange') ? '#7a5a1f' : null;
+      // Cell shading only applies to gap-mode (non-Attiki). For occupancy-mode
+      // (Attiki) there's no single "gap" to shade — the row name is tinted instead.
       function flagRuns(winDays, gapLen) {
         const limit = Math.min(winDays, stateArr.length);
         let i = 0;
@@ -7175,11 +7225,11 @@ loadFromDb()
           } else i++;
         }
       }
-      const alertColor = (r.alert && r.alert.level === 'red') ? '#7a2f2f'
-                       : (r.alert && r.alert.level === 'orange') ? '#7a5a1f' : null;
-      if (r.alert && r.alert.level === 'red') flagRuns(rules.red.window, rules.red.gap);
-      else if (r.alert && r.alert.level === 'orange') flagRuns(rules.orange.window, rules.orange.gap);
-      body += `<div style="font-size:11px;color:#c8ccd8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:6px">${r.isAttiki ? '<span style="color:#C9A84C">◆</span> ' : ''}${r.name}</div>`;
+      if (r.alert && r.alert.mode === 'gap' && r.alert.level === 'red') flagRuns(rules.red.window, rules.red.gap);
+      else if (r.alert && r.alert.mode === 'gap' && r.alert.level === 'orange') flagRuns(rules.orange.window, rules.orange.gap);
+      const nameColor = (r.alert && r.alert.mode === 'occupancy' && r.alert.level)
+        ? (r.alert.level === 'red' ? '#e0776f' : '#e0a341') : '#c8ccd8';
+      body += `<div style="font-size:11px;color:${nameColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:6px">${r.isAttiki ? '<span style="color:#C9A84C">◆</span> ' : ''}${r.name}</div>`;
       stateArr.forEach((s, i) => {
         let bg = s === 1 ? '#1a7a4a' : s === 2 ? '#C9A84C' : '#242c3f';
         if (alertIdx.has(i) && alertColor) bg = alertColor;
@@ -7235,7 +7285,7 @@ loadFromDb()
     if (typeof XLSX === 'undefined') { if (typeof toast==='function') toast('XLSX library not loaded.','err'); return; }
     const rows = buildPerfRows();
     const aoa = [
-      ['Property', 'Attiki', 'Occ 15d', 'Occ 30d', 'Occ 7d fwd', 'Occ 30d fwd', 'Pace 7d (pts)', 'Pace 30d (pts)', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Alert', 'Gap (nights)'],
+      ['Property', 'Attiki', 'Occ 15d', 'Occ 30d', 'Occ 7d fwd', 'Occ 30d fwd', 'Pace 7d (pts)', 'Pace 30d (pts)', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Alert', 'Alert detail'],
       ...rows.map(r => [
         r.name,
         r.isAttiki ? 'Yes' : '',
@@ -7249,7 +7299,7 @@ loadFromDb()
         r.price30 != null ? +(r.price30).toFixed(2) : '',
         r.adrChange != null ? +(r.adrChange).toFixed(4) : '',
         (r.alert && r.alert.level) ? r.alert.level.toUpperCase() : '',
-        (r.alert && r.alert.level) ? r.alert.nights : '',
+        (r.alert && r.alert.level) ? alertLabel(r.alert) : '',
       ])
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
