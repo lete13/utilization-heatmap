@@ -6692,6 +6692,23 @@ loadFromDb()
   let _perfTimer = null;
   let _perfLastRun = null;
 
+  // ── CONFIG: Athens apartments (for the 3-day-gap alert) ─────────────────────
+  // Paste the EXACT property names (as they appear in the table) that are in
+  // Athens. Only these are checked for empty 3+ night gaps in the next 30 days.
+  // Matching is case-insensitive and trims whitespace.
+  const ATHENS_APARTMENTS = [
+    // "Acropolis Skyline Sunset",
+    // "Eclectic Apartment with Stunning Seaview",
+    // "Elysian Lycabettus - Horizon",
+    // ...add your Athens property names here
+  ];
+  const _athensSet = new Set(ATHENS_APARTMENTS.map(s => s.trim().toLowerCase()));
+  function isAthens(name) { return _athensSet.has(String(name || '').trim().toLowerCase()); }
+
+  // ── Sort state (default: name A→Z) ──────────────────────────────────────────
+  let _sortKey = 'name';
+  let _sortDir = 1; // 1 = asc, -1 = desc
+
   // ── Date helpers ───────────────────────────────────────────────────────────
   function pDate(s) {
     if (!s) return null;
@@ -6757,6 +6774,40 @@ loadFromDb()
     return Math.max(0, Math.round((b - a) / 86400000));
   }
 
+  // Find the longest run of consecutive UNBOOKED nights within [start, end).
+  // Returns { maxGap, firstGapStart } — used for the Athens empty-gap alert.
+  function longestGap(bks, start, end) {
+    // Build a set of booked day-keys
+    const booked = new Set();
+    const isBlock = (typeof isRevenueBooking === 'function') ? (b) => !isRevenueBooking(b) : () => false;
+    for (const b of bks) {
+      if (b.cancelled || isBlock(b)) continue;
+      const ci = pDate(b.checkIn), co = pDate(b.checkOut);
+      if (!ci || !co) continue;
+      let night = new Date(ci);
+      while (night < co) {
+        if (night >= start && night < end) {
+          booked.add(night.getFullYear() * 10000 + night.getMonth() * 100 + night.getDate());
+        }
+        night.setDate(night.getDate() + 1);
+      }
+    }
+    let maxGap = 0, cur = 0, firstGapStart = null, curStart = null;
+    const day = new Date(start);
+    while (day < end) {
+      const key = day.getFullYear() * 10000 + day.getMonth() * 100 + day.getDate();
+      if (!booked.has(key)) {
+        if (cur === 0) curStart = new Date(day);
+        cur++;
+        if (cur > maxGap) { maxGap = cur; firstGapStart = curStart; }
+      } else {
+        cur = 0;
+      }
+      day.setDate(day.getDate() + 1);
+    }
+    return { maxGap, firstGapStart };
+  }
+
   // ── Build the report rows from S.bks / S.apts ──────────────────────────────
   function buildPerfRows() {
     // S is declared with `let` at top-level, so it is NOT on window.
@@ -6766,6 +6817,8 @@ loadFromDb()
     const bks  = _S.bks  ? _S.bks  : [];
     const t = today0();
     const w15 = daysAgo(15), w30 = daysAgo(30), f7 = daysAhead(7), f30 = daysAhead(30);
+    // prior-period windows (for ADR change + booking pace "expected")
+    const w60 = daysAgo(60); // days 31–60 ago = [w60, w30)
 
     // group bookings by apartment id
     const byApt = {};
@@ -6775,8 +6828,6 @@ loadFromDb()
     }
 
     const rows = [];
-    // one row per known apartment (so empty ones still show), plus any orphan groups
-    const seen = new Set();
     const list = apts.length ? apts.map(a => ({ id: a.id, name: a.name })) : [];
     // include apt groups that exist in bookings but not in apts
     Object.keys(byApt).forEach(k => {
@@ -6785,25 +6836,113 @@ loadFromDb()
 
     for (const apt of list) {
       const set = byApt[apt.id] || byApt[apt.name] || [];
+      const name = apt.name || apt.id;
+
+      // Occupancy
+      const occ30fwd = bookedNights(set, t, f30) / 30;
+      // Booking pace: expected = how the prior comparable 30-day window actually
+      // filled (days 31–60 ago). Current = next-30-day booked occupancy.
+      const occExpected = bookedNights(set, w60, w30) / 30;
+      const paceDelta = (occExpected > 0 || occ30fwd > 0) ? (occ30fwd - occExpected) : null;
+
+      // ADR: current 30d vs prior 30d (days 31–60 ago)
+      const price30 = avgNightlyPrice(set, w30, t);
+      const pricePrev30 = avgNightlyPrice(set, w60, w30);
+      const adrChange = (price30 != null && pricePrev30 != null && pricePrev30 > 0)
+        ? (price30 - pricePrev30) / pricePrev30 : null;
+
+      // Athens empty-gap alert (next 30 days)
+      let gapAlert = null;
+      if (isAthens(name)) {
+        const g = longestGap(set, t, f30);
+        if (g.maxGap >= 3) gapAlert = { nights: g.maxGap, from: g.firstGapStart };
+      }
+
       rows.push({
-        name: apt.name || apt.id,
+        name,
         occ15:   bookedNights(set, w15, t) / 15,
         occ30:   bookedNights(set, w30, t) / 30,
         occ7fwd: bookedNights(set, t, f7) / 7,
-        occ30fwd:bookedNights(set, t, f30) / 30,
+        occ30fwd,
+        occExpected,
+        paceDelta,
         price15: avgNightlyPrice(set, w15, t),
-        price30: avgNightlyPrice(set, w30, t),
+        price30,
+        adrChange,
+        gapAlert,
+        isAthens: isAthens(name),
         bookings: set.length,
       });
     }
-    // sort by 30d occupancy desc
-    rows.sort((a, b) => (b.occ30 || 0) - (a.occ30 || 0));
+
+    // ── Sort ──
+    const dir = _sortDir;
+    rows.sort((a, b) => {
+      let av, bv;
+      if (_sortKey === 'name') {
+        return dir * String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
+      }
+      av = a[_sortKey]; bv = b[_sortKey];
+      if (av == null) av = -Infinity;
+      if (bv == null) bv = -Infinity;
+      return dir * (av - bv);
+    });
     return rows;
+  }
+
+  // Toggle sort when a header is clicked
+  window.perfSort = function (key) {
+    if (_sortKey === key) _sortDir *= -1;
+    else { _sortKey = key; _sortDir = (key === 'name') ? 1 : -1; }
+    renderPerf();
+  };
+  function sortArrow(key) {
+    if (_sortKey !== key) return '';
+    return _sortDir === 1 ? ' ▲' : ' ▼';
   }
 
   // ── Rendering ──────────────────────────────────────────────────────────────
   function pct(v) { return v == null ? '—' : Math.round(v * 100) + '%'; }
   function eur(v) { return v == null ? '—' : '€' + v.toFixed(2); }
+
+  // A small ↑/↓ delta chip (green up / red down)
+  function deltaChip(frac, opts) {
+    opts = opts || {};
+    if (frac == null || isNaN(frac)) return '';
+    const p = Math.round(frac * 100);
+    if (p === 0) return `<span style="font-size:11px;color:var(--tx3)">→0%</span>`;
+    const up = p > 0;
+    const col = up ? '#1a7a4a' : '#c0392b';
+    const arrow = up ? '↑' : '↓';
+    return `<span style="font-size:11px;font-weight:600;color:${col}">${arrow}${Math.abs(p)}%</span>`;
+  }
+
+  // Price cell with ADR-change arrow underneath
+  function priceCell(price, change) {
+    if (price == null) return '—';
+    const chip = deltaChip(change);
+    return `<div style="line-height:1.3">
+      <div class="mono">€${price.toFixed(2)}</div>
+      ${chip ? `<div style="margin-top:1px">${chip}</div>` : ''}
+    </div>`;
+  }
+
+  // Booking-pace cell: current fwd occ, expected under it, and the gap chip
+  function paceCell(cur, expected, delta) {
+    const curTxt = pct(cur);
+    const expTxt = pct(expected);
+    let chip = '';
+    if (delta != null) {
+      const p = Math.round(delta * 100);
+      const up = p >= 0;
+      const col = up ? '#1a7a4a' : '#c0392b';
+      chip = `<span style="font-size:11px;font-weight:600;color:${col}">${up ? '↑' : '↓'}${Math.abs(p)}%</span>`;
+    }
+    return `<div style="line-height:1.35">
+      <div class="mono" style="font-weight:600">${curTxt} ${chip}</div>
+      <div style="font-size:10px;color:var(--tx3)">exp ${expTxt}</div>
+    </div>`;
+  }
 
   function renderPerf() {
     const panel = document.getElementById('tab-perf');
@@ -6815,6 +6954,12 @@ loadFromDb()
     const priced = rows.filter(r => r.price30 != null);
     const avgPrice = priced.length ? priced.reduce((a, r) => a + r.price30, 0) / priced.length : 0;
     const highOcc = rows.filter(r => (r.occ30 || 0) >= 0.8).length;
+    // Portfolio booking pace: avg current fwd vs avg expected
+    const avgFwd = rows.length ? rows.reduce((a, r) => a + (r.occ30fwd || 0), 0) / rows.length : 0;
+    const avgExp = rows.length ? rows.reduce((a, r) => a + (r.occExpected || 0), 0) / rows.length : 0;
+    const pacePortfolio = avgExp > 0 ? (avgFwd - avgExp) : null;
+    // Athens gap alerts
+    const alertRows = rows.filter(r => r.gapAlert);
 
     const nextRun = new Date(_perfLastRun.getTime() + PERF_REFRESH_MS);
 
@@ -6834,12 +6979,23 @@ loadFromDb()
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px">
           <div class="kpi"><div class="kpi-lbl">Properties</div><div class="kpi-val">${rows.length}</div><div class="kpi-sub">tracked</div></div>
           <div class="kpi"><div class="kpi-lbl">Avg Occupancy 30d</div><div class="kpi-val">${pct(avgOcc)}</div><div class="kpi-sub">portfolio</div></div>
+          <div class="kpi"><div class="kpi-lbl">Booking Pace</div><div class="kpi-val" style="display:flex;align-items:baseline;gap:6px">${pct(avgFwd)} <span style="font-size:13px">${deltaChip(pacePortfolio)}</span></div><div class="kpi-sub">next 30d vs expected ${pct(avgExp)}</div></div>
           <div class="kpi"><div class="kpi-lbl">Avg Nightly Rate</div><div class="kpi-val">€${avgPrice.toFixed(0)}</div><div class="kpi-sub">past 30 days</div></div>
-          <div class="kpi"><div class="kpi-lbl">High Occupancy</div><div class="kpi-val">${highOcc}/${rows.length}</div><div class="kpi-sub">≥80% (30d)</div></div>
+          <div class="kpi" style="${alertRows.length ? 'border-color:#c0392b' : ''}"><div class="kpi-lbl">Athens Gap Alerts</div><div class="kpi-val" style="color:${alertRows.length ? '#c0392b' : 'inherit'}">${alertRows.length}</div><div class="kpi-sub">3+ empty nights (30d)</div></div>
         </div>
+
+        ${alertRows.length ? `
+        <div class="card" style="padding:12px 16px;margin-bottom:16px;border-left:3px solid #c0392b;background:rgba(192,57,43,.06)">
+          <div style="font-size:12px;font-weight:600;color:#c0392b;margin-bottom:6px">⚠ Athens properties with 3+ consecutive empty nights (next 30 days)</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            ${alertRows.map(r => `<span style="font-size:11px;background:rgba(192,57,43,.1);border:1px solid rgba(192,57,43,.3);border-radius:12px;padding:3px 10px">
+              <strong>${r.name}</strong> · ${r.gapAlert.nights} nights${r.gapAlert.from ? ' from ' + r.gapAlert.from.toLocaleDateString() : ''}
+            </span>`).join('')}
+          </div>
+        </div>` : ''}
 
         ${!rows.length ? `
           <div class="card" style="text-align:center;padding:40px;color:var(--tx3)">
@@ -6849,34 +7005,34 @@ loadFromDb()
           <div style="overflow-x:auto">
             <table class="tbl">
               <thead><tr>
-                <th>Property</th>
-                <th class="r">Occ 15d</th>
-                <th class="r">Occ 30d</th>
-                <th class="r">Occ 7d fwd</th>
-                <th class="r">Occ 30d fwd</th>
-                <th class="r">Avg € 15d</th>
-                <th class="r">Avg € 30d</th>
+                <th style="cursor:pointer;user-select:none" onclick="perfSort('name')">Property${sortArrow('name')}</th>
+                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ15')">Occ 15d${sortArrow('occ15')}</th>
+                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ30')">Occ 30d${sortArrow('occ30')}</th>
+                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ7fwd')">Occ 7d fwd${sortArrow('occ7fwd')}</th>
+                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ30fwd')">Booking Pace${sortArrow('occ30fwd')}</th>
+                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('price15')">ADR 15d${sortArrow('price15')}</th>
+                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('price30')">ADR 30d${sortArrow('price30')}</th>
               </tr></thead>
               <tbody>
                 ${rows.map(r => `
-                  <tr>
-                    <td style="font-weight:500">${r.name}</td>
+                  <tr${r.gapAlert ? ' style="background:rgba(192,57,43,.05)"' : ''}>
+                    <td style="font-weight:500">${r.isAthens ? '<span title="Athens" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.gapAlert ? ` <span title="${r.gapAlert.nights} empty nights" style="color:#c0392b;font-size:11px">⚠${r.gapAlert.nights}</span>` : ''}</td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
                     <td class="r mono">${pct(r.occ7fwd)}</td>
-                    <td class="r mono">${pct(r.occ30fwd)}</td>
-                    <td class="r mono">${eur(r.price15)}</td>
-                    <td class="r mono">${eur(r.price30)}</td>
+                    <td class="r">${paceCell(r.occ30fwd, r.occExpected, r.paceDelta)}</td>
+                    <td class="r">${priceCell(r.price15, null)}</td>
+                    <td class="r">${priceCell(r.price30, r.adrChange)}</td>
                   </tr>`).join('')}
               </tbody>
             </table>
           </div>
         </div>
         <div style="font-size:11px;color:var(--tx3);margin-top:10px;line-height:1.6">
-          Occupancy = booked nights ÷ nights in window. Avg price = payout ÷ nights, averaged over
-          bookings that check in within the window. Data comes from the server's automatic Hosthub
-          sync (runs every 2 hours); this tab pulls the latest synced data and recomputes.
-          “Refresh now” triggers an immediate sync.
+          <strong>Booking Pace</strong> = next-30-day occupancy vs what the prior comparable window (days 31–60 ago) actually filled.
+          <strong>ADR</strong> arrow = current 30d avg price vs prior 30 days.
+          <strong>◆</strong> marks Athens properties; <strong style="color:#c0392b">⚠</strong> flags 3+ consecutive empty nights in the next 30 days.
+          Click any column header to sort. Data auto-syncs from Hosthub every 2h.
         </div>`}
       </div>`;
   }
@@ -6924,31 +7080,31 @@ loadFromDb()
     if (typeof XLSX === 'undefined') { if (typeof toast==='function') toast('XLSX library not loaded.','err'); return; }
     const rows = buildPerfRows();
     const aoa = [
-      ['Property', 'Occ 15d', 'Occ 30d', 'Occ 7d fwd', 'Occ 30d fwd', 'Avg Price 15d', 'Avg Price 30d'],
+      ['Property', 'Athens', 'Occ 15d', 'Occ 30d', 'Occ 7d fwd', 'Booking Pace (fwd 30d)', 'Expected (prior)', 'Pace Δ', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Gap Alert (nights)'],
       ...rows.map(r => [
         r.name,
+        r.isAthens ? 'Yes' : '',
         r.occ15 != null ? +(r.occ15).toFixed(4) : '',
         r.occ30 != null ? +(r.occ30).toFixed(4) : '',
         r.occ7fwd != null ? +(r.occ7fwd).toFixed(4) : '',
         r.occ30fwd != null ? +(r.occ30fwd).toFixed(4) : '',
+        r.occExpected != null ? +(r.occExpected).toFixed(4) : '',
+        r.paceDelta != null ? +(r.paceDelta).toFixed(4) : '',
         r.price15 != null ? +(r.price15).toFixed(2) : '',
         r.price30 != null ? +(r.price30).toFixed(2) : '',
+        r.adrChange != null ? +(r.adrChange).toFixed(4) : '',
+        r.gapAlert ? r.gapAlert.nights : '',
       ])
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    // percent format for occupancy columns
     const range = XLSX.utils.decode_range(ws['!ref']);
+    const pctCols = [2, 3, 4, 5, 6, 7, 10];   // occupancy + pace delta + adr change
+    const eurCols = [8, 9];                     // ADR prices
     for (let R = 1; R <= range.e.r; R++) {
-      for (let C = 1; C <= 4; C++) {
-        const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
-        if (cell && typeof cell.v === 'number') cell.z = '0%';
-      }
-      for (let C = 5; C <= 6; C++) {
-        const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
-        if (cell && typeof cell.v === 'number') cell.z = '€#,##0.00';
-      }
+      pctCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '0%'; });
+      eurCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '€#,##0.00'; });
     }
-    ws['!cols'] = [{ wch: 32 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 13 }, { wch: 13 }];
+    ws['!cols'] = [{ wch: 32 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 16 }, { wch: 14 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 16 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Performance');
     const d = new Date().toISOString().slice(0, 10);
