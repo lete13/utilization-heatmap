@@ -6692,18 +6692,25 @@ loadFromDb()
   let _perfTimer = null;
   let _perfLastRun = null;
 
-  // ── CONFIG: Athens apartments (for the 3-day-gap alert) ─────────────────────
+  // ── CONFIG: Attiki apartments (Athens / Piraeus region) ─────────────────────
   // Paste the EXACT property names (as they appear in the table) that are in
-  // Athens. Only these are checked for empty 3+ night gaps in the next 30 days.
-  // Matching is case-insensitive and trims whitespace.
-  const ATHENS_APARTMENTS = [
+  // Attiki. Apartments NOT in this list are treated as "outside Attiki"
+  // (e.g. Thessaloniki) and use the other alert thresholds. Case-insensitive.
+  const ATTIKI_APARTMENTS = [
     // "Acropolis Skyline Sunset",
-    // "Eclectic Apartment with Stunning Seaview",
-    // "Elysian Lycabettus - Horizon",
-    // ...add your Athens property names here
+    // "Athens Unity Apartment",
+    // "Votsala 5 Luxury Studio with Balcony in Piraeus",
+    // ...add your Attiki (Athens/Piraeus) property names here
   ];
-  const _athensSet = new Set(ATHENS_APARTMENTS.map(s => s.trim().toLowerCase()));
-  function isAthens(name) { return _athensSet.has(String(name || '').trim().toLowerCase()); }
+  const _attikiSet = new Set(ATTIKI_APARTMENTS.map(s => s.trim().toLowerCase()));
+  function isAttiki(name) { return _attikiSet.has(String(name || '').trim().toLowerCase()); }
+
+  // Alert rules. Each: window (days ahead to scan) + gap (consecutive empty
+  // nights that trigger). Red takes priority over orange when both fire.
+  const ALERT_RULES = {
+    attiki:    { orange: { window: 7,  gap: 3 }, red: { window: 15, gap: 5 } },
+    nonAttiki: { orange: { window: 15, gap: 3 }, red: { window: 20, gap: 10 } },
+  };
 
   // ── Sort state (default: name A→Z) ──────────────────────────────────────────
   let _sortKey = 'name';
@@ -6812,6 +6819,23 @@ loadFromDb()
     return { maxGap, firstGapStart };
   }
 
+  // Evaluate a property's alert level based on its Attiki status and the rules.
+  // Returns { level: 'red'|'orange'|null, nights, from, scope }.
+  function evalAlert(bks, name) {
+    const t = today0();
+    const rules = isAttiki(name) ? ALERT_RULES.attiki : ALERT_RULES.nonAttiki;
+    // Red first (more severe wins)
+    const red = longestGap(bks, t, daysAhead(rules.red.window));
+    if (red.maxGap >= rules.red.gap) {
+      return { level: 'red', nights: red.maxGap, from: red.firstGapStart, scope: rules.red };
+    }
+    const orange = longestGap(bks, t, daysAhead(rules.orange.window));
+    if (orange.maxGap >= rules.orange.gap) {
+      return { level: 'orange', nights: orange.maxGap, from: orange.firstGapStart, scope: rules.orange };
+    }
+    return { level: null };
+  }
+
   // ── Build the report rows from S.bks / S.apts ──────────────────────────────
   function buildPerfRows() {
     // S is declared with `let` at top-level, so it is NOT on window.
@@ -6857,12 +6881,8 @@ loadFromDb()
                           && cur.count >= 3 && prev.count >= 3)
         ? (cur.avg - prev.avg) / prev.avg : null;
 
-      // Athens empty-gap alert (next 30 days)
-      let gapAlert = null;
-      if (isAthens(name)) {
-        const g = longestGap(set, t, f30);
-        if (g.maxGap >= 3) gapAlert = { nights: g.maxGap, from: g.firstGapStart };
-      }
+      // Vacancy alert (Attiki vs non-Attiki thresholds; red wins over orange)
+      const alert = evalAlert(set, name);
 
       rows.push({
         name,
@@ -6873,8 +6893,8 @@ loadFromDb()
         price15: avgNightlyPrice(set, w15, t),
         price30,
         adrChange,
-        gapAlert,
-        isAthens: isAthens(name),
+        alert,
+        isAttiki: isAttiki(name),
         _set: set, // keep for heatmap
         bookings: set.length,
       });
@@ -6973,7 +6993,9 @@ loadFromDb()
     const avgFwd = rows.length ? rows.reduce((a, r) => a + (r.occ30fwd || 0), 0) / rows.length : 0;
     const pacePortfolio = null; // portfolio vs itself is 0 by definition; show avg instead
     // Athens gap alerts
-    const alertRows = rows.filter(r => r.gapAlert);
+    const redRows = rows.filter(r => r.alert && r.alert.level === 'red');
+    const orangeRows = rows.filter(r => r.alert && r.alert.level === 'orange');
+    const alertRows = rows.filter(r => r.alert && r.alert.level);
 
     const nextRun = new Date(_perfLastRun.getTime() + PERF_REFRESH_MS);
 
@@ -6998,17 +7020,30 @@ loadFromDb()
           <div class="kpi"><div class="kpi-lbl">Avg Occupancy 30d</div><div class="kpi-val">${pct(avgOcc)}</div><div class="kpi-sub">portfolio</div></div>
           <div class="kpi"><div class="kpi-lbl">Avg Fwd Occupancy</div><div class="kpi-val">${pct(avgFwd)}</div><div class="kpi-sub">next 30 days booked</div></div>
           <div class="kpi"><div class="kpi-lbl">Avg Nightly Rate</div><div class="kpi-val">€${avgPrice.toFixed(0)}</div><div class="kpi-sub">past 30 days</div></div>
-          <div class="kpi" style="${alertRows.length ? 'border-color:#c0392b' : ''}"><div class="kpi-lbl">Athens Gap Alerts</div><div class="kpi-val" style="color:${alertRows.length ? '#c0392b' : 'inherit'}">${alertRows.length}</div><div class="kpi-sub">3+ empty nights (30d)</div></div>
+          <div class="kpi" style="${redRows.length ? 'border-color:#c0392b' : orangeRows.length ? 'border-color:#d68910' : ''}"><div class="kpi-lbl">Vacancy Alerts</div><div class="kpi-val" style="color:${redRows.length ? '#c0392b' : orangeRows.length ? '#d68910' : 'inherit'}">${redRows.length}<span style="font-size:13px;color:#d68910"> / ${orangeRows.length}</span></div><div class="kpi-sub">red / orange</div></div>
         </div>
 
         ${alertRows.length ? `
-        <div class="card" style="padding:12px 16px;margin-bottom:16px;border-left:3px solid #c0392b;background:rgba(192,57,43,.06)">
-          <div style="font-size:12px;font-weight:600;color:#c0392b;margin-bottom:6px">⚠ Athens properties with 3+ consecutive empty nights (next 30 days)</div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px">
-            ${alertRows.map(r => `<span style="font-size:11px;background:rgba(192,57,43,.1);border:1px solid rgba(192,57,43,.3);border-radius:12px;padding:3px 10px">
-              <strong>${r.name}</strong> · ${r.gapAlert.nights} nights${r.gapAlert.from ? ' from ' + r.gapAlert.from.toLocaleDateString() : ''}
-            </span>`).join('')}
-          </div>
+        <div class="card" style="padding:12px 16px;margin-bottom:16px;border-left:3px solid ${redRows.length ? '#c0392b' : '#d68910'};background:${redRows.length ? 'rgba(192,57,43,.06)' : 'rgba(214,137,16,.06)'}">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px">⚠ Vacancy alerts — properties with an upcoming empty gap</div>
+          ${redRows.length ? `
+          <div style="margin-bottom:${orangeRows.length ? '8px' : '0'}">
+            <div style="font-size:11px;font-weight:600;color:#c0392b;margin-bottom:4px">RED — critical</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              ${redRows.map(r => `<span style="font-size:11px;background:rgba(192,57,43,.12);border:1px solid rgba(192,57,43,.35);border-radius:12px;padding:3px 10px">
+                <strong>${r.name}</strong> · ${r.alert.nights} empty nights${r.alert.from ? ' from ' + r.alert.from.toLocaleDateString() : ''}
+              </span>`).join('')}
+            </div>
+          </div>` : ''}
+          ${orangeRows.length ? `
+          <div>
+            <div style="font-size:11px;font-weight:600;color:#d68910;margin-bottom:4px">ORANGE — watch</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              ${orangeRows.map(r => `<span style="font-size:11px;background:rgba(214,137,16,.12);border:1px solid rgba(214,137,16,.35);border-radius:12px;padding:3px 10px">
+                <strong>${r.name}</strong> · ${r.alert.nights} empty nights${r.alert.from ? ' from ' + r.alert.from.toLocaleDateString() : ''}
+              </span>`).join('')}
+            </div>
+          </div>` : ''}
         </div>` : ''}
 
         ${!rows.length ? `
@@ -7032,8 +7067,8 @@ loadFromDb()
               </tr></thead>
               <tbody>
                 ${rows.map(r => `
-                  <tr${r.gapAlert ? ' style="background:rgba(192,57,43,.05)"' : ''}>
-                    <td style="font-weight:500">${r.isAthens ? '<span title="Athens" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.gapAlert ? ` <span title="${r.gapAlert.nights} empty nights" style="color:#c0392b;font-size:11px">⚠${r.gapAlert.nights}</span>` : ''}</td>
+                  <tr${r.alert && r.alert.level === 'red' ? ' style="background:rgba(192,57,43,.09)"' : r.alert && r.alert.level === 'orange' ? ' style="background:rgba(214,137,16,.09)"' : ''}>
+                    <td style="font-weight:500">${r.isAttiki ? '<span title="Attiki (Athens/Piraeus)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.alert && r.alert.level ? ` <span title="${r.alert.nights} empty nights ahead" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">⚠${r.alert.nights}</span>` : ''}</td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
                     <td class="r mono">${pct(r.occ7fwd)}</td>
@@ -7048,11 +7083,11 @@ loadFromDb()
           </div>
         </div>
         <div style="font-size:11px;color:var(--tx3);margin-top:10px;line-height:1.6">
-          <strong>Heatmap</strong> shows each property's next 30 nights (booked / check-in-out / empty).
+          <strong>Heatmap</strong> shows each property's next 30 nights (booked / check-in-out / empty; empty gaps that trigger an alert are shaded orange/red).
           <strong>Occ 7d/30d fwd</strong> = share of the next 7 / 30 nights already booked.
-          <strong>Pace 7d/30d</strong> = this property's forward occupancy vs the portfolio average right now (↑ ahead, ↓ behind, in points).
-          <strong>ADR</strong> arrow (30d) = current vs prior 30-day avg price, shown only with ≥3 bookings each side.
-          <strong>◆</strong> = Athens; <strong style="color:#c0392b">⚠</strong> = 3+ empty nights ahead.
+          <strong>Pace 7d/30d</strong> = forward occupancy vs the portfolio average (↑ ahead, ↓ behind, in points).
+          <strong>ADR</strong> arrow (30d) = current vs prior 30-day avg price (≥3 bookings each side).
+          <br><strong>Vacancy alerts</strong> — <span style="color:#C9A84C">◆</span> Attiki (Athens/Piraeus): <span style="color:#d68910">orange</span> = 3+ empty nights in next 7 days, <span style="color:#c0392b">red</span> = 5+ in next 15 days. Non-Attiki: <span style="color:#d68910">orange</span> = 3+ empty nights in next 15 days, <span style="color:#c0392b">red</span> = 10+ in next 20 days. Red overrides orange.
           Click any header to sort. Auto-syncs every 2h.
         </div>`}
       </div>`;
@@ -7118,28 +7153,36 @@ loadFromDb()
     let body = '';
     rows.forEach(r => {
       const st = nightStates(r._set || [], start, end);
-      // detect 3+ empty runs for Athens
       const stateArr = days.map(d => {
         const k = dayKey(d);
         if (st.edges.has(k)) return 2;
         if (st.booked.has(k)) return 1;
         return 0;
       });
+      // Highlight empty runs that meet this property's alert thresholds.
+      // Colour matches the property's overall alert level (red/orange).
       const alertIdx = new Set();
-      if (r.isAthens) {
+      const rules = isAttiki(r.name) ? ALERT_RULES.attiki : ALERT_RULES.nonAttiki;
+      // scan for red-qualifying runs within red.window, orange within orange.window
+      function flagRuns(winDays, gapLen) {
+        const limit = Math.min(winDays, stateArr.length);
         let i = 0;
-        while (i < stateArr.length) {
+        while (i < limit) {
           if (stateArr[i] === 0) {
-            let j = i; while (j < stateArr.length && stateArr[j] === 0) j++;
-            if (j - i >= 3) for (let k = i; k < j; k++) alertIdx.add(k);
+            let j = i; while (j < limit && stateArr[j] === 0) j++;
+            if (j - i >= gapLen) for (let k = i; k < j; k++) alertIdx.add(k);
             i = j;
           } else i++;
         }
       }
-      body += `<div style="font-size:11px;color:#c8ccd8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:6px">${r.isAthens ? '<span style="color:#C9A84C">◆</span> ' : ''}${r.name}</div>`;
+      const alertColor = (r.alert && r.alert.level === 'red') ? '#7a2f2f'
+                       : (r.alert && r.alert.level === 'orange') ? '#7a5a1f' : null;
+      if (r.alert && r.alert.level === 'red') flagRuns(rules.red.window, rules.red.gap);
+      else if (r.alert && r.alert.level === 'orange') flagRuns(rules.orange.window, rules.orange.gap);
+      body += `<div style="font-size:11px;color:#c8ccd8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:6px">${r.isAttiki ? '<span style="color:#C9A84C">◆</span> ' : ''}${r.name}</div>`;
       stateArr.forEach((s, i) => {
         let bg = s === 1 ? '#1a7a4a' : s === 2 ? '#C9A84C' : '#242c3f';
-        if (alertIdx.has(i)) bg = '#7a2f2f';
+        if (alertIdx.has(i) && alertColor) bg = alertColor;
         body += `<div style="height:16px;border-radius:2px;background:${bg}" title="${r.name} · ${days[i].toLocaleDateString()}"></div>`;
       });
     });
@@ -7155,7 +7198,8 @@ loadFromDb()
           <span style="display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#1a7a4a;display:inline-block"></span>Booked</span>
           <span style="display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#C9A84C;display:inline-block"></span>Check-in / out</span>
           <span style="display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#242c3f;display:inline-block"></span>Empty</span>
-          <span style="display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#7a2f2f;display:inline-block"></span>3+ empty (Athens alert)</span>
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#7a5a1f;display:inline-block"></span>Orange alert gap</span>
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#7a2f2f;display:inline-block"></span>Red alert gap</span>
         </div>`;
   }
 
@@ -7191,10 +7235,10 @@ loadFromDb()
     if (typeof XLSX === 'undefined') { if (typeof toast==='function') toast('XLSX library not loaded.','err'); return; }
     const rows = buildPerfRows();
     const aoa = [
-      ['Property', 'Athens', 'Occ 15d', 'Occ 30d', 'Occ 7d fwd', 'Occ 30d fwd', 'Pace 7d (pts)', 'Pace 30d (pts)', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Gap Alert (nights)'],
+      ['Property', 'Attiki', 'Occ 15d', 'Occ 30d', 'Occ 7d fwd', 'Occ 30d fwd', 'Pace 7d (pts)', 'Pace 30d (pts)', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Alert', 'Gap (nights)'],
       ...rows.map(r => [
         r.name,
-        r.isAthens ? 'Yes' : '',
+        r.isAttiki ? 'Yes' : '',
         r.occ15 != null ? +(r.occ15).toFixed(4) : '',
         r.occ30 != null ? +(r.occ30).toFixed(4) : '',
         r.occ7fwd != null ? +(r.occ7fwd).toFixed(4) : '',
@@ -7204,7 +7248,8 @@ loadFromDb()
         r.price15 != null ? +(r.price15).toFixed(2) : '',
         r.price30 != null ? +(r.price30).toFixed(2) : '',
         r.adrChange != null ? +(r.adrChange).toFixed(4) : '',
-        r.gapAlert ? r.gapAlert.nights : '',
+        (r.alert && r.alert.level) ? r.alert.level.toUpperCase() : '',
+        (r.alert && r.alert.level) ? r.alert.nights : '',
       ])
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -7215,7 +7260,7 @@ loadFromDb()
       pctCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '0%'; });
       eurCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '€#,##0.00'; });
     }
-    ws['!cols'] = [{ wch: 32 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 16 }];
+    ws['!cols'] = [{ wch: 32 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 8 }, { wch: 12 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Performance');
     const d = new Date().toISOString().slice(0, 10);
