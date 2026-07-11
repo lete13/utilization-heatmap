@@ -7065,6 +7065,7 @@ loadFromDb()
 
       rows.push({
         name,
+        aptId: apt.id,
         category: categoryOf(name),
         occ15:   bookedNights(set, w15, t) / 15,
         occ30:   bookedNights(set, w30, t) / 30,
@@ -7275,7 +7276,7 @@ loadFromDb()
                                 : r.trendLevel === 'orange' ? 'background:rgba(214,137,16,.05)' : '';
                     html += `
                   <tr style="${rowBg}">
-                    <td style="font-weight:500">${r.isAttiki ? '<span title="occupancy-based alert" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}</td>
+                    <td style="font-weight:500">${r.isAttiki ? '<span title="occupancy-based alert" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button></td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
                     <td class="r mono">${pct(r.occ7fwd)}</td>
@@ -7446,6 +7447,94 @@ loadFromDb()
   };
 
   // ── Excel export (uses the app's bundled XLSX / SheetJS) ────────────────────
+  // ── Per-property 3-month course chart (weekly occupancy + ADR) ─────────────
+  function weeklyCourse(aptId, aptName) {
+    const _S = (typeof S !== 'undefined' && S) ? S : {};
+    const bks = (_S.bks || []).filter(b => (b.aptId === aptId || b.aptName === aptName));
+    const WEEKS = 13;
+    const t = today0();
+    const points = [];
+    for (let w = WEEKS; w >= 1; w--) {
+      const start = new Date(t); start.setDate(start.getDate() - w * 7);
+      const end = new Date(start); end.setDate(end.getDate() + 7);
+      points.push({
+        label: `${start.getDate()}/${start.getMonth() + 1}`,
+        occ: bookedNights(bks, start, end) / 7,
+        adr: avgNightlyPrice(bks, start, end),
+      });
+    }
+    return points;
+  }
+
+  function courseSVG(points) {
+    const W = 720, H = 340, padL = 46, padR = 52, padT = 24, padB = 40;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const n = points.length;
+    const xAt = (i) => padL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+    const yOcc = (v) => padT + plotH - (Math.max(0, Math.min(1, v)) * plotH);
+    const adrs = points.map(p => p.adr).filter(v => v != null);
+    const adrMax = adrs.length ? Math.max(...adrs) * 1.15 : 100;
+    const yAdr = (v) => padT + plotH - (v / (adrMax || 1)) * plotH;
+
+    let grid = '';
+    for (let g = 0; g <= 4; g++) {
+      const yv = g / 4;
+      const y = yOcc(yv);
+      grid += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#2a3245" stroke-width="1"/>`;
+      grid += `<text x="${padL - 8}" y="${y + 3}" text-anchor="end" font-size="10" fill="#8890a8">${Math.round(yv * 100)}%</text>`;
+      grid += `<text x="${W - padR + 8}" y="${y + 3}" text-anchor="start" font-size="10" fill="#8890a8">€${Math.round(adrMax * yv)}</text>`;
+    }
+    let xlabels = '';
+    points.forEach((p, i) => {
+      if (i % 2 === 0 || i === n - 1) {
+        xlabels += `<text x="${xAt(i)}" y="${H - padB + 16}" text-anchor="middle" font-size="9" fill="#8890a8">${p.label}</text>`;
+      }
+    });
+    const occPath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yOcc(p.occ).toFixed(1)}`).join(' ');
+    const occDots = points.map((p, i) => `<circle cx="${xAt(i).toFixed(1)}" cy="${yOcc(p.occ).toFixed(1)}" r="2.5" fill="#C9A84C"/>`).join('');
+    let adrPath = '', adrDots = '', started = false;
+    points.forEach((p, i) => {
+      if (p.adr == null) { started = false; return; }
+      adrPath += `${started ? 'L' : 'M'}${xAt(i).toFixed(1)},${yAdr(p.adr).toFixed(1)} `;
+      adrDots += `<circle cx="${xAt(i).toFixed(1)}" cy="${yAdr(p.adr).toFixed(1)}" r="2.5" fill="#3ecf8e"/>`;
+      started = true;
+    });
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px">
+      ${grid}
+      <path d="${occPath}" fill="none" stroke="#C9A84C" stroke-width="2"/>
+      ${occDots}
+      <path d="${adrPath}" fill="none" stroke="#3ecf8e" stroke-width="2"/>
+      ${adrDots}
+      ${xlabels}
+    </svg>`;
+  }
+
+  window.perfShowCourse = function (aptId, aptName) {
+    const points = weeklyCourse(aptId, aptName);
+    const hasData = points.some(p => p.occ > 0 || p.adr != null);
+    let modal = document.getElementById('perf-course-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'perf-course-modal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+      modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+      document.body.appendChild(modal);
+    }
+    modal.innerHTML = `
+      <div style="background:#131a28;border:1px solid var(--bdr);border-radius:12px;padding:20px 22px;max-width:780px;width:100%">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+          <div style="font-size:16px;font-weight:600">${aptName}</div>
+          <button class="btn sm" onclick="document.getElementById('perf-course-modal').remove()">Close</button>
+        </div>
+        <div style="font-size:12px;color:var(--tx3);margin-bottom:14px">Last 3 months · weekly actuals</div>
+        <div style="display:flex;gap:16px;margin-bottom:10px;font-size:12px">
+          <span style="display:flex;align-items:center;gap:6px"><span style="width:16px;height:3px;background:#C9A84C;display:inline-block;border-radius:2px"></span>Occupancy (left)</span>
+          <span style="display:flex;align-items:center;gap:6px"><span style="width:16px;height:3px;background:#3ecf8e;display:inline-block;border-radius:2px"></span>ADR (right)</span>
+        </div>
+        ${hasData ? courseSVG(points) : '<div style="padding:50px;text-align:center;color:var(--tx3)">No booking history in the last 3 months for this property.</div>'}
+      </div>`;
+  };
+
   window.perfExportExcel = function () {
     if (typeof XLSX === 'undefined') { if (typeof toast==='function') toast('XLSX library not loaded.','err'); return; }
     const rows = buildPerfRows();
