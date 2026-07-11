@@ -6695,6 +6695,13 @@ loadFromDb()
   // ── Date helpers ───────────────────────────────────────────────────────────
   function pDate(s) {
     if (!s) return null;
+    // The app stores dates as D/M/YYYY (e.g. "11/7/2026"). Use the app's own
+    // parseD() which handles that format correctly. Falling back to new Date()
+    // would misread "11/7/2026" as Nov 7 (US M/D/Y) and corrupt every window.
+    if (typeof parseD === 'function') {
+      const d = parseD(s);
+      return (d && !isNaN(d)) ? d : null;
+    }
     const d = new Date(String(s).slice(0, 10));
     return isNaN(d) ? null : d;
   }
