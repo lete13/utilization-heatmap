@@ -6882,6 +6882,11 @@ loadFromDb()
   // Evaluate a property's alert level.
   // Attiki → near-term occupancy thresholds. Non-Attiki → consecutive-gap.
   // Returns { level, mode, detail } where detail carries the triggering info.
+  // Recent-strength grace: a proven strong performer (past 7 days >80% occupied)
+  // with a temporary forward dip shouldn't be flagged "critical". We downgrade
+  // its red to orange. Tunable.
+  const GRACE_RULE = { lookbackDays: 7, minOcc: 0.80 };
+
   function evalAlert(bks, name) {
     const t = today0();
     if (isAttiki(name)) {
@@ -6892,13 +6897,18 @@ loadFromDb()
         const occ = bookedNights(bks, t, daysAhead(w)) / w;
         if (occ < worst.occ) worst = { occ, window: w };
       });
+      // recent past occupancy for the grace check
+      const pastOcc = bookedNights(bks, daysAgo(GRACE_RULE.lookbackDays), t) / GRACE_RULE.lookbackDays;
+      const graced = pastOcc >= GRACE_RULE.minOcc;
       if (worst.occ < rules.red) {
-        return { level: 'red', mode: 'occupancy', occ: worst.occ, window: worst.window };
+        // strong recent performer → soften red to orange rather than critical
+        const level = graced ? 'orange' : 'red';
+        return { level, mode: 'occupancy', occ: worst.occ, window: worst.window, graced, pastOcc };
       }
       if (worst.occ < rules.orange) {
-        return { level: 'orange', mode: 'occupancy', occ: worst.occ, window: worst.window };
+        return { level: 'orange', mode: 'occupancy', occ: worst.occ, window: worst.window, pastOcc };
       }
-      return { level: null, mode: 'occupancy', occ: worst.occ, window: worst.window };
+      return { level: null, mode: 'occupancy', occ: worst.occ, window: worst.window, pastOcc };
     }
     // Non-Attiki: gap-based (red wins)
     const rules = ALERT_RULES.nonAttiki;
@@ -6917,7 +6927,8 @@ loadFromDb()
   function alertLabel(a) {
     if (!a || !a.level) return '';
     if (a.mode === 'occupancy') {
-      return `${Math.round(a.occ * 100)}% booked next ${a.window}d`;
+      const base = `${Math.round(a.occ * 100)}% booked next ${a.window}d`;
+      return a.graced ? `${base} · softened (recent ${Math.round(a.pastOcc*100)}% occ)` : base;
     }
     return `${a.nights} empty nights${a.from ? ' from ' + a.from.toLocaleDateString() : ''}`;
   }
@@ -7200,6 +7211,7 @@ loadFromDb()
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn sm" onclick="perfShowReadme()" title="How every metric is calculated"><i class="ti ti-info-circle"></i> How it works</button>
             <button class="btn sm" onclick="perfExportExcel()"><i class="ti ti-download"></i> Excel</button>
             <button class="btn primary sm" onclick="perfRefresh(true)"><i class="ti ti-refresh"></i> Refresh now</button>
           </div>
@@ -7464,7 +7476,7 @@ loadFromDb()
   }
 
   function courseSVG(points) {
-    const W = 720, H = 340, padL = 46, padR = 52, padT = 24, padB = 40;
+    const W = 720, H = 340, padL = 46, padR = 58, padT = 24, padB = 40;
     const plotW = W - padL - padR, plotH = H - padT - padB;
     const n = points.length;
     const xAt = (i) => padL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
@@ -7473,38 +7485,139 @@ loadFromDb()
     const adrMax = adrs.length ? Math.max(...adrs) * 1.15 : 100;
     const yAdr = (v) => padT + plotH - (v / (adrMax || 1)) * plotH;
 
+    // A week has "no data" if there were no bookings at all touching it
+    // (occ 0 AND adr null) — distinguish from a genuine low-occupancy week.
+    const noData = (p) => (!p.occ || p.occ === 0) && p.adr == null;
+
+    // ── Gridlines: occupancy every 25% (left), ADR denser every ~1/6 (right) ──
     let grid = '';
-    for (let g = 0; g <= 4; g++) {
+    for (let g = 0; g <= 4; g++) {          // occupancy axis (left) 0/25/50/75/100
       const yv = g / 4;
       const y = yOcc(yv);
       grid += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#2a3245" stroke-width="1"/>`;
       grid += `<text x="${padL - 8}" y="${y + 3}" text-anchor="end" font-size="10" fill="#8890a8">${Math.round(yv * 100)}%</text>`;
-      grid += `<text x="${W - padR + 8}" y="${y + 3}" text-anchor="start" font-size="10" fill="#8890a8">€${Math.round(adrMax * yv)}</text>`;
     }
+    for (let g = 0; g <= 6; g++) {          // ADR axis (right) — denser, 7 labels
+      const yv = g / 6;
+      const y = padT + plotH - yv * plotH;
+      grid += `<text x="${W - padR + 8}" y="${y + 3}" text-anchor="start" font-size="9.5" fill="#6fcf9a">€${Math.round(adrMax * yv)}</text>`;
+    }
+
     let xlabels = '';
     points.forEach((p, i) => {
       if (i % 2 === 0 || i === n - 1) {
         xlabels += `<text x="${xAt(i)}" y="${H - padB + 16}" text-anchor="middle" font-size="9" fill="#8890a8">${p.label}</text>`;
       }
     });
-    const occPath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yOcc(p.occ).toFixed(1)}`).join(' ');
-    const occDots = points.map((p, i) => `<circle cx="${xAt(i).toFixed(1)}" cy="${yOcc(p.occ).toFixed(1)}" r="2.5" fill="#C9A84C"/>`).join('');
-    let adrPath = '', adrDots = '', started = false;
-    points.forEach((p, i) => {
-      if (p.adr == null) { started = false; return; }
-      adrPath += `${started ? 'L' : 'M'}${xAt(i).toFixed(1)},${yAdr(p.adr).toFixed(1)} `;
-      adrDots += `<circle cx="${xAt(i).toFixed(1)}" cy="${yAdr(p.adr).toFixed(1)}" r="2.5" fill="#3ecf8e"/>`;
-      started = true;
-    });
+
+    // ── Occupancy line: solid across weeks WITH data; dotted across no-data gaps ──
+    let occSolid = '', occDotted = '', occDots = '';
+    for (let i = 0; i < n; i++) {
+      const p = points[i];
+      if (!noData(p)) {
+        occDots += `<circle cx="${xAt(i).toFixed(1)}" cy="${yOcc(p.occ).toFixed(1)}" r="2.5" fill="#C9A84C"/>`;
+      }
+      if (i === 0) continue;
+      const prev = points[i - 1];
+      const x1 = xAt(i - 1).toFixed(1), x2 = xAt(i).toFixed(1);
+      // Only draw a real segment between two data-bearing weeks. If either end
+      // is a no-data week, draw a faint dotted connector at mid-height instead.
+      if (!noData(prev) && !noData(p)) {
+        occSolid += `M${x1},${yOcc(prev.occ).toFixed(1)} L${x2},${yOcc(p.occ).toFixed(1)} `;
+      } else {
+        const y1 = noData(prev) ? padT + plotH - plotH * 0.5 : yOcc(prev.occ);
+        const y2 = noData(p)   ? padT + plotH - plotH * 0.5 : yOcc(p.occ);
+        occDotted += `M${x1},${y1.toFixed(1)} L${x2},${y2.toFixed(1)} `;
+      }
+    }
+
+    // ── ADR line: same treatment (dotted across weeks with no ADR) ──
+    let adrSolid = '', adrDotted = '', adrDots = '';
+    for (let i = 0; i < n; i++) {
+      const p = points[i];
+      if (p.adr != null) {
+        adrDots += `<circle cx="${xAt(i).toFixed(1)}" cy="${yAdr(p.adr).toFixed(1)}" r="2.5" fill="#3ecf8e"/>`;
+      }
+      if (i === 0) continue;
+      const prev = points[i - 1];
+      const x1 = xAt(i - 1).toFixed(1), x2 = xAt(i).toFixed(1);
+      if (prev.adr != null && p.adr != null) {
+        adrSolid += `M${x1},${yAdr(prev.adr).toFixed(1)} L${x2},${yAdr(p.adr).toFixed(1)} `;
+      }
+      // if either end lacks ADR, we simply don't connect (dots still show)
+    }
+
     return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px">
       ${grid}
-      <path d="${occPath}" fill="none" stroke="#C9A84C" stroke-width="2"/>
+      <path d="${occDotted}" fill="none" stroke="#C9A84C" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.5"/>
+      <path d="${occSolid}" fill="none" stroke="#C9A84C" stroke-width="2"/>
       ${occDots}
-      <path d="${adrPath}" fill="none" stroke="#3ecf8e" stroke-width="2"/>
+      <path d="${adrSolid}" fill="none" stroke="#3ecf8e" stroke-width="2"/>
       ${adrDots}
       ${xlabels}
     </svg>`;
   }
+
+  window.perfShowReadme = function () {
+    let modal = document.getElementById('perf-readme-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'perf-readme-modal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px';
+      modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+      document.body.appendChild(modal);
+    }
+    const rt = TREND_RULES, ar = ALERT_RULES, gr = GRACE_RULE;
+    const P = (v) => Math.round(v * 100) + '%';
+    modal.innerHTML = `
+      <div style="background:#131a28;border:1px solid var(--bdr);border-radius:12px;padding:22px 26px;max-width:760px;width:100%;max-height:86vh;overflow:auto">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
+          <div style="font-size:17px;font-weight:600;color:#C9A84C">How the Performance tab is calculated</div>
+          <button class="btn sm" onclick="document.getElementById('perf-readme-modal').remove()">Close</button>
+        </div>
+        <div style="font-size:12.5px;line-height:1.7;color:#c8ccd8">
+
+          <div style="font-weight:600;color:#e8eaf0;margin:6px 0 4px">Data source</div>
+          Every number comes from your bookings synced from Hosthub. The server auto-syncs every 2 hours and stores the result; this tab reads that data. Dates are stored as D/M/YYYY. Cancelled bookings and maintenance/owner blocks are excluded from all calculations.
+
+          <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Occupancy</div>
+          Occupancy = <em>distinct booked nights ÷ nights in the window</em>. Each calendar night counts once, so overlapping or duplicate bookings can never exceed 100%. Past windows (15d, 30d) look backward from today; forward windows (7d, 30d) look ahead.
+
+          <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">ADR (Average Daily Rate)</div>
+          For each booking checking in within the window, we take payout ÷ nights (a per-night rate), then average those across bookings. The <strong>ADR arrow</strong> compares the current 30-day ADR to the prior 30 days (days 31–60 ago) and only appears when both periods have at least 3 bookings and a plausible (≥€15) rate — this suppresses noise from one-off bookings.
+
+          <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Booking Pace</div>
+          Pace 7d / 30d compare this property's forward occupancy against the <strong>portfolio average</strong> forward occupancy right now. ↑ means it's pacing ahead of your other listings, ↓ behind (shown in points). It's a relative "how am I doing vs the rest of the portfolio today" signal — an honest like-for-like, not a future-vs-past comparison.
+
+          <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Categories</div>
+          Properties are grouped into <strong>Attiki</strong>, <strong>Thessaloniki</strong>, and <strong>City Escapes</strong>. Attiki + Thessaloniki are day-to-day short-stay units judged on near-term fill; City Escapes are longer-stay units judged on empty-night gaps.
+
+          <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Vacancy alerts</div>
+          <strong>Attiki & Thessaloniki</strong> (occupancy-based): the next ${ar.attiki.windows.join(' & ')} day window — below ${P(ar.attiki.orange)} booked = orange, below ${P(ar.attiki.red)} = red. The badge shows the % booked.<br>
+          <strong>City Escapes</strong> (gap-based): ${ar.nonAttiki.orange.gap}+ empty nights in the next ${ar.nonAttiki.orange.window} days = orange; ${ar.nonAttiki.red.gap}+ empty nights in the next ${ar.nonAttiki.red.window} days = red.<br>
+          <strong>Recent-strength grace:</strong> if an occupancy-based property was ≥${P(gr.minOcc)} occupied over the past ${gr.lookbackDays} days, a red alert is softened to orange — a proven performer with a short-term dip isn't treated as critical.
+
+          <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Deterioration signals (Signals column)</div>
+          These compare today against a stored snapshot ~${rt.lookbackDays} days ago, so they need a few days of history to activate (the server saves one snapshot per day). They are:
+          <div style="margin:4px 0 0 8px">
+            • <strong>Occupancy erosion</strong> — next-14-day occupancy dropped ≥${P(rt.occErosion.orange)} (orange) / ${P(rt.occErosion.red)} (red) vs the baseline.<br>
+            • <strong>Sudden vacancy</strong> — ≥${rt.suddenVacancy.orange} (orange) / ${rt.suddenVacancy.red} (red) booked nights disappeared (a cancellation).<br>
+            • <strong>ADR drift</strong> — trailing ADR slid down ≥${P(rt.adrDrift.orange)} (orange) / ${P(rt.adrDrift.red)} (red).<br>
+            • <strong>Pace slowdown</strong> — forward occupancy fell ≥${P(rt.paceSlowdown.orange)} (orange) / ${P(rt.paceSlowdown.red)} (red) below this property's own recent average.
+          </div>
+
+          <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Heatmap</div>
+          Each property's next 30 nights: green = booked, gold = check-in/out day, dark = empty. Empty gaps that trigger a gap-based alert are shaded orange/red. Mondays are labelled in gold.
+
+          <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">3-month course chart (📈)</div>
+          Weekly actual occupancy (gold, left axis) and ADR (teal, right axis) over the last 13 weeks. Weeks with no bookings at all are shown as dotted "no data" segments rather than a misleading drop to zero.
+
+          <div style="font-size:11px;color:var(--tx3);margin-top:16px;padding-top:12px;border-top:1px solid var(--bdr)">
+            All thresholds shown above are configurable in the code (ALERT_RULES, TREND_RULES, GRACE_RULE). Data auto-refreshes every 2 hours; “Refresh now” triggers an immediate Hosthub sync.
+          </div>
+        </div>
+      </div>`;
+  };
 
   window.perfShowCourse = function (aptId, aptName) {
     const points = weeklyCourse(aptId, aptName);
