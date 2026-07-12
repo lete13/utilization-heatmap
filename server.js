@@ -549,6 +549,7 @@ async function runSync(apiKey, onLog) {
     };
     return {
       id:ev.id, aptId:_aptMatch?.id||'', aptName:_aptName, cancelled:ev.is_visible===false, cancelledAt:ev.cancelled_at||null,
+      created:ev.created||null, createdOnChannel:ev.created_on_channel||null,
       platform: (()=>{
         const code=(ev.source?.channel_type_code||'').toLowerCase().replace(/[^a-z]/g,'');
         const n=(ev.source?.name||'').toLowerCase();
