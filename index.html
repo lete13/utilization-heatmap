@@ -6693,17 +6693,51 @@ loadFromDb()
   let _perfLastRun = null;
   let _perfHistory = [];   // rolling daily snapshots from /api/history
 
-  // ── TREND / DETERIORATION thresholds (tunable) ──────────────────────────────
-  // Each signal compares today's snapshot to a baseline N days back. Values are
-  // in occupancy points (0.10 = 10 percentage points) or % for ADR.
-  const TREND_RULES = {
-    lookbackDays: 3,          // compare today vs the snapshot ~this many days ago
-    occErosion:   { orange: 0.10, red: 0.20 },   // forward occ (14d) dropped this much
-    suddenVacancy:{ orange: 2,    red: 4 },       // booked nights (30d) that disappeared
-    adrDrift:     { orange: 0.05, red: 0.12 },    // ADR slid down this fraction
-    paceSlowdown: { orange: 0.10, red: 0.20 },    // next-14d occ below its own recent avg
-    minHistory:   3,          // need at least this many snapshots before trend fires
+  // ── DETERIORATION SIGNALS — judged against the apartment's OWN history ───────
+  // Each apartment is compared to its own proven track record, not to a few days
+  // ago. This works immediately (uses booking history, no snapshot warmup) and
+  // measures "is it underperforming its normal/good state" rather than "did it
+  // wobble recently". Two signals, each checked vs BOTH baselines separately:
+  //   • Occupancy below norm — forward occ under its hist / previous-month occ
+  //   • ADR below norm       — current ADR under its hist / previous-month ADR
+  // Thresholds are how far below the baseline counts as orange / red.
+  const SIGNAL_RULES = {
+    occBelow: { orange: 0.10, red: 0.20 },   // occupancy points below baseline
+    adrBelow: { orange: 0.05, red: 0.12 },   // fraction below baseline ADR
   };
+
+  // Given the already-computed deltas on a row, produce signal badges.
+  // Deltas are negative when below baseline.
+  function histSignals(row) {
+    const out = [];
+    const occRule = SIGNAL_RULES.occBelow;
+    const adrRule = SIGNAL_RULES.adrBelow;
+    // helper to grade a "below by" magnitude against a rule
+    const grade = (belowBy, rule) => belowBy >= rule.red ? 'red' : belowBy >= rule.orange ? 'orange' : null;
+
+    // Occupancy vs full history
+    if (row.pace30Hist != null && row.pace30Hist < 0) {
+      const lvl = grade(-row.pace30Hist, occRule);
+      if (lvl) out.push({ key: 'occ-hist', level: lvl, label: `occ ${Math.round(-row.pace30Hist*100)}pts < hist` });
+    }
+    // Occupancy vs previous month
+    if (row.pace30Prev != null && row.pace30Prev < 0) {
+      const lvl = grade(-row.pace30Prev, occRule);
+      if (lvl) out.push({ key: 'occ-prev', level: lvl, label: `occ ${Math.round(-row.pace30Prev*100)}pts < last mo` });
+    }
+    // ADR vs full history
+    if (row.adrPaceHist != null && row.adrPaceHist < 0) {
+      const lvl = grade(-row.adrPaceHist, adrRule);
+      if (lvl) out.push({ key: 'adr-hist', level: lvl, label: `ADR ${Math.round(-row.adrPaceHist*100)}% < hist` });
+    }
+    // ADR vs previous month
+    if (row.adrPacePrev != null && row.adrPacePrev < 0) {
+      const lvl = grade(-row.adrPacePrev, adrRule);
+      if (lvl) out.push({ key: 'adr-prev', level: lvl, label: `ADR ${Math.round(-row.adrPacePrev*100)}% < last mo` });
+    }
+    return out;
+  }
+
 
   // ── CONFIG: property categories ─────────────────────────────────────────────
   // THESSALONIKI: short-stay city apartments in Thessaloniki. Use the SAME
@@ -6887,6 +6921,32 @@ loadFromDb()
   // its red to orange. Tunable.
   const GRACE_RULE = { lookbackDays: 7, minOcc: 0.80 };
 
+  // ── Underpricing alert (light-blue) ─────────────────────────────────────────
+  // Fires when a property is in clear high demand (past-7-day occupancy above
+  // minOcc) BUT its current ADR is below its own baseline (full-history avg or
+  // previous-month ADR). Meaning: nearly always full yet priced below its norm —
+  // a likely opportunity to raise the nightly rate. Tunable.
+  const UNDERPRICE_RULE = { lookbackDays: 7, minOcc: 0.90, minDrop: 0.0 };
+
+  // Returns { flag, occ, base, dropPct } or { flag:false }.
+  function evalUnderprice(bks) {
+    const t = today0();
+    const occ = bookedNights(bks, daysAgo(UNDERPRICE_RULE.lookbackDays), t) / UNDERPRICE_RULE.lookbackDays;
+    if (occ <= UNDERPRICE_RULE.minOcc) return { flag: false };
+    const cur = avgNightlyPriceInfo(bks, daysAgo(30), t);
+    if (cur.avg == null || cur.avg < 15) return { flag: false };
+    const hist = fullHistoryAdr(bks);
+    const prev = previousMonthAdr(bks);
+    // the higher of the two baselines is the "norm" we compare against
+    const base = Math.max(hist != null ? hist : 0, prev != null ? prev : 0);
+    if (!base) return { flag: false };
+    const dropPct = (base - cur.avg) / base;
+    if (dropPct > UNDERPRICE_RULE.minDrop) {
+      return { flag: true, occ, base, cur: cur.avg, dropPct };
+    }
+    return { flag: false };
+  }
+
   // ── Monthly occupancy baselines (from the rental's own booking course) ──────
   // Full-history = mean of monthly achieved occupancy from the rental's first
   // booking to now (current month prorated, months before first booking excluded).
@@ -7068,50 +7128,9 @@ loadFromDb()
   // Evaluate deterioration signals for one property. Returns an array of
   // { key, level, label } for whichever signals fire. Empty until enough history.
   function evalTrends(aptId) {
-    const out = [];
-    if (_perfHistory.length < TREND_RULES.minHistory) return out;
-    const now = latestSnapshot();
-    const past = snapshotNear(TREND_RULES.lookbackDays);
-    if (!now || !past) return out;
-    const cur = snapProp(now, aptId);
-    const old = snapProp(past, aptId);
-    if (!cur || !old) return out;
-
-    // 1) Occupancy erosion — forward 14d occ dropped vs baseline
-    if (cur.occ14 != null && old.occ14 != null) {
-      const drop = old.occ14 - cur.occ14;
-      const r = TREND_RULES.occErosion;
-      if (drop >= r.red) out.push({ key: 'erosion', level: 'red', label: `14d occ −${Math.round(drop*100)}pts` });
-      else if (drop >= r.orange) out.push({ key: 'erosion', level: 'orange', label: `14d occ −${Math.round(drop*100)}pts` });
-    }
-    // 2) Sudden vacancy — booked nights (30d) fell (cancellation)
-    if (cur.bn30 != null && old.bn30 != null) {
-      const lost = old.bn30 - cur.bn30;
-      const r = TREND_RULES.suddenVacancy;
-      if (lost >= r.red) out.push({ key: 'vacancy', level: 'red', label: `−${lost} nights booked` });
-      else if (lost >= r.orange) out.push({ key: 'vacancy', level: 'orange', label: `−${lost} nights booked` });
-    }
-    // 3) ADR drift — trailing ADR sliding down
-    if (cur.adr30 != null && old.adr30 != null && old.adr30 > 0) {
-      const dropFrac = (old.adr30 - cur.adr30) / old.adr30;
-      const r = TREND_RULES.adrDrift;
-      if (dropFrac >= r.red) out.push({ key: 'adr', level: 'red', label: `ADR −${Math.round(dropFrac*100)}%` });
-      else if (dropFrac >= r.orange) out.push({ key: 'adr', level: 'orange', label: `ADR −${Math.round(dropFrac*100)}%` });
-    }
-    // 4) Pace slowdown — next-14d occ below this property's own recent average
-    //    (average occ14 across the snapshots we have, excluding today)
-    const past14s = _perfHistory
-      .map(s => snapProp(s, aptId))
-      .filter(p => p && p.occ14 != null)
-      .map(p => p.occ14);
-    if (past14s.length >= TREND_RULES.minHistory && cur.occ14 != null) {
-      const avg = past14s.reduce((a, v) => a + v, 0) / past14s.length;
-      const below = avg - cur.occ14;
-      const r = TREND_RULES.paceSlowdown;
-      if (below >= r.red) out.push({ key: 'pace', level: 'red', label: `pace ${Math.round(below*100)}pts below norm` });
-      else if (below >= r.orange) out.push({ key: 'pace', level: 'orange', label: `pace ${Math.round(below*100)}pts below norm` });
-    }
-    return out;
+    // Superseded by histSignals() (historical-norm signals). Kept as a no-op
+    // so any lingering references stay safe.
+    return [];
   }
   function trendWorst(trends) {
     if (trends.some(t => t.level === 'red')) return 'red';
@@ -7163,6 +7182,8 @@ loadFromDb()
       // ADR baselines (current 30d ADR vs its own history / previous month)
       const histAdr = fullHistoryAdr(set);
       const prevMoAdr = previousMonthAdr(set);
+      // Underpricing (light-blue): high recent demand but priced below own norm
+      const underprice = evalUnderprice(set);
 
       // ADR: current 30d vs prior 30d, gated on sample size (>=3 each side)
       // and on plausibility (ignore sub-€15 nightly averages that signal a
@@ -7177,7 +7198,6 @@ loadFromDb()
 
       // Vacancy alert (Attiki/Thess occupancy vs Escape gap; red wins over orange)
       const alert = evalAlert(set, name);
-      const trends = evalTrends(apt.id);
 
       rows.push({
         name,
@@ -7198,19 +7218,25 @@ loadFromDb()
         // ADR baselines + % deltas vs current 30d ADR
         histAdr,
         prevMoAdr,
+        underprice,
         adrPaceHist: (histAdr   != null && price30 != null && histAdr   > 0) ? (price30 - histAdr)   / histAdr   : null,
         adrPacePrev: (prevMoAdr != null && price30 != null && prevMoAdr > 0) ? (price30 - prevMoAdr) / prevMoAdr : null,
         price15: avgNightlyPrice(set, w15, t),
         price30,
         adrChange,
         alert,
-        trends,
-        trendLevel: trendWorst(trends),
         isAttiki: isAttiki(name),
         _set: set, // keep for heatmap
         bookings: set.length,
       });
     }
+
+    // Deterioration signals: judge each apartment vs its OWN history (works
+    // immediately from the deltas computed above — no snapshot warmup).
+    rows.forEach(r => {
+      r.trends = histSignals(r);
+      r.trendLevel = trendWorst(r.trends);
+    });
 
     // (Pace now uses each rental's own history/previous-month baselines,
     //  computed per-row above — no portfolio averaging needed.)
@@ -7342,6 +7368,7 @@ loadFromDb()
     const alertRows = rows.filter(r => r.alert && r.alert.level);
     const trendRed = rows.filter(r => r.trendLevel === 'red');
     const trendOrange = rows.filter(r => r.trendLevel === 'orange');
+    const underpriced = rows.filter(r => r.underprice && r.underprice.flag);
     const histDays = _perfHistory.length;
 
     const nextRun = new Date(_perfLastRun.getTime() + PERF_REFRESH_MS);
@@ -7363,13 +7390,14 @@ loadFromDb()
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:18px">
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:12px;margin-bottom:18px">
           <div class="kpi"><div class="kpi-lbl">Properties</div><div class="kpi-val">${rows.length}</div><div class="kpi-sub">tracked</div></div>
           <div class="kpi"><div class="kpi-lbl">Avg Occupancy 30d</div><div class="kpi-val">${pct(avgOcc)}</div><div class="kpi-sub">portfolio</div></div>
           <div class="kpi"><div class="kpi-lbl">Avg Fwd Occupancy</div><div class="kpi-val">${pct(avgFwd)}</div><div class="kpi-sub">next 30 days booked</div></div>
           <div class="kpi"><div class="kpi-lbl">Avg Nightly Rate</div><div class="kpi-val">€${avgPrice.toFixed(0)}</div><div class="kpi-sub">past 30 days</div></div>
           <div class="kpi" style="${redRows.length ? 'border-color:#c0392b' : orangeRows.length ? 'border-color:#d68910' : ''}"><div class="kpi-lbl">Vacancy Alerts</div><div class="kpi-val" style="color:${redRows.length ? '#c0392b' : orangeRows.length ? '#d68910' : 'inherit'}">${redRows.length}<span style="font-size:13px;color:#d68910"> / ${orangeRows.length}</span></div><div class="kpi-sub">red / orange</div></div>
-          <div class="kpi" style="${trendRed.length ? 'border-color:#c0392b' : trendOrange.length ? 'border-color:#d68910' : ''}"><div class="kpi-lbl">Deteriorating</div><div class="kpi-val" style="color:${trendRed.length ? '#c0392b' : trendOrange.length ? '#d68910' : 'inherit'}">${histDays < TREND_RULES.minHistory ? '—' : `${trendRed.length}<span style="font-size:13px;color:#d68910"> / ${trendOrange.length}</span>`}</div><div class="kpi-sub">${histDays < TREND_RULES.minHistory ? `building baseline (${histDays}d)` : 'trend red / orange'}</div></div>
+          <div class="kpi" style="${underpriced.length ? 'border-color:#3898ec' : ''}"><div class="kpi-lbl">Underpriced</div><div class="kpi-val" style="color:${underpriced.length ? '#3898ec' : 'inherit'}">${underpriced.length}</div><div class="kpi-sub">full but below norm</div></div>
+          <div class="kpi" style="${trendRed.length ? 'border-color:#c0392b' : trendOrange.length ? 'border-color:#d68910' : ''}"><div class="kpi-lbl">Below Norm</div><div class="kpi-val" style="color:${trendRed.length ? '#c0392b' : trendOrange.length ? '#d68910' : 'inherit'}">${trendRed.length}<span style="font-size:13px;color:#d68910"> / ${trendOrange.length}</span></div><div class="kpi-sub">underperforming history</div></div>
         </div>
 
         ${alertRows.length ? `
@@ -7431,11 +7459,15 @@ loadFromDb()
                     ).join('');
                     const rowBg = r.alert && r.alert.level === 'red' ? 'background:rgba(192,57,43,.09)'
                                 : r.alert && r.alert.level === 'orange' ? 'background:rgba(214,137,16,.09)'
+                                : (r.underprice && r.underprice.flag) ? 'background:rgba(56,152,236,.10)'
                                 : r.trendLevel === 'red' ? 'background:rgba(192,57,43,.05)'
                                 : r.trendLevel === 'orange' ? 'background:rgba(214,137,16,.05)' : '';
+                    const upBadge = (r.underprice && r.underprice.flag)
+                      ? ` <span title="High demand (past 7d ${Math.round(r.underprice.occ*100)}% occ) but ADR €${Math.round(r.underprice.cur)} is below its norm €${Math.round(r.underprice.base)} — consider raising the rate" style="color:#3898ec;font-size:11px;font-weight:600">▲ raise €${Math.round(r.underprice.cur)}→€${Math.round(r.underprice.base)}</span>`
+                      : '';
                     html += `
                   <tr style="${rowBg}">
-                    <td style="font-weight:500">${r.isAttiki ? '<span title="occupancy-based alert" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button></td>
+                    <td style="font-weight:500">${r.isAttiki ? '<span title="occupancy-based alert" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}${upBadge} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button></td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
                     <td class="r">${occBar(r.occ7past)}</td>
@@ -7716,7 +7748,7 @@ loadFromDb()
       modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
       document.body.appendChild(modal);
     }
-    const rt = TREND_RULES, ar = ALERT_RULES, gr = GRACE_RULE;
+    const rt = SIGNAL_RULES, ar = ALERT_RULES, gr = GRACE_RULE;
     const P = (v) => Math.round(v * 100) + '%';
     modal.innerHTML = `
       <div style="background:#131a28;border:1px solid var(--bdr);border-radius:12px;padding:22px 26px;max-width:760px;width:100%;max-height:86vh;overflow:auto">
@@ -7749,13 +7781,14 @@ loadFromDb()
           <strong>City Escapes</strong> (gap-based): ${ar.nonAttiki.orange.gap}+ empty nights in the next ${ar.nonAttiki.orange.window} days = orange; ${ar.nonAttiki.red.gap}+ empty nights in the next ${ar.nonAttiki.red.window} days = red.<br>
           <strong>Recent-strength grace:</strong> if an occupancy-based property was ≥${P(gr.minOcc)} occupied over the past ${gr.lookbackDays} days, a red alert is softened to orange — a proven performer with a short-term dip isn't treated as critical.
 
+          <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Underpricing alert (light-blue)</div>
+          A property is flagged light-blue when its <strong>past-7-day occupancy is above ${Math.round(UNDERPRICE_RULE.minOcc*100)}%</strong> (clear high demand) <strong>and</strong> its current 30-day ADR is <strong>below its own norm</strong> (the higher of its full-history average ADR and last month's ADR). Meaning: nearly always full yet priced below where it has sold before — a likely opportunity to raise the nightly rate. The badge shows the current rate and the norm to aim for.
+
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Deterioration signals (Signals column)</div>
-          These compare today against a stored snapshot ~${rt.lookbackDays} days ago, so they need a few days of history to activate (the server saves one snapshot per day). They are:
+          These judge each apartment against its <strong>own history</strong> — flagging when current performance falls below its proven norm (not just a recent wobble). They work immediately from booking history. Two signals, each checked against both baselines:
           <div style="margin:4px 0 0 8px">
-            • <strong>Occupancy erosion</strong> — next-14-day occupancy dropped ≥${P(rt.occErosion.orange)} (orange) / ${P(rt.occErosion.red)} (red) vs the baseline.<br>
-            • <strong>Sudden vacancy</strong> — ≥${rt.suddenVacancy.orange} (orange) / ${rt.suddenVacancy.red} (red) booked nights disappeared (a cancellation).<br>
-            • <strong>ADR drift</strong> — trailing ADR slid down ≥${P(rt.adrDrift.orange)} (orange) / ${P(rt.adrDrift.red)} (red).<br>
-            • <strong>Pace slowdown</strong> — forward occupancy fell ≥${P(rt.paceSlowdown.orange)} (orange) / ${P(rt.paceSlowdown.red)} (red) below this property's own recent average.
+            • <strong>Occupancy below norm</strong> — forward occupancy ≥${P(rt.occBelow.orange)} (orange) / ${P(rt.occBelow.red)} (red) points below its full-history or last-month occupancy.<br>
+            • <strong>ADR below norm</strong> — current ADR ≥${P(rt.adrBelow.orange)} (orange) / ${P(rt.adrBelow.red)} (red) below its full-history or last-month ADR.
           </div>
 
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Heatmap</div>
@@ -7765,7 +7798,7 @@ loadFromDb()
           Weekly actual occupancy (gold, left axis) and ADR (teal, right axis) over the last 13 weeks. Weeks with no bookings at all are shown as dotted "no data" segments rather than a misleading drop to zero.
 
           <div style="font-size:11px;color:var(--tx3);margin-top:16px;padding-top:12px;border-top:1px solid var(--bdr)">
-            All thresholds shown above are configurable in the code (ALERT_RULES, TREND_RULES, GRACE_RULE). Data auto-refreshes every 2 hours; “Refresh now” triggers an immediate Hosthub sync.
+            All thresholds shown above are configurable in the code (ALERT_RULES, SIGNAL_RULES, GRACE_RULE, UNDERPRICE_RULE). Data auto-refreshes every 2 hours; “Refresh now” triggers an immediate Hosthub sync.
           </div>
         </div>
       </div>`;
