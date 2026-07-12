@@ -6887,6 +6887,66 @@ loadFromDb()
   // its red to orange. Tunable.
   const GRACE_RULE = { lookbackDays: 7, minOcc: 0.80 };
 
+  // ── Monthly occupancy baselines (from the rental's own booking course) ──────
+  // Full-history = mean of monthly achieved occupancy from the rental's first
+  // booking to now (current month prorated, months before first booking excluded).
+  // Previous-month = achieved occupancy of the last completed calendar month.
+  function monthKey(d) { return d.getFullYear() * 12 + d.getMonth(); }
+  function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
+
+  function firstBookingDate(bks) {
+    let min = null;
+    for (const b of bks) {
+      if (b.cancelled) continue;
+      const ci = pDate(b.checkIn);
+      if (ci && (!min || ci < min)) min = ci;
+    }
+    return min;
+  }
+
+  // occupancy for a specific calendar month (achieved). For the current month,
+  // prorate by days elapsed so far.
+  function monthOccupancy(bks, y, m) {
+    const start = new Date(y, m, 1);
+    const t = today0();
+    const isCurrent = (y === t.getFullYear() && m === t.getMonth());
+    const full = daysInMonth(y, m);
+    const end = isCurrent ? t : new Date(y, m, full);          // prorate current month
+    const denomDays = isCurrent ? Math.max(1, Math.round((t - start) / 86400000)) : full;
+    // end is exclusive in bookedNights; for a full past month go to first of next month
+    const endEx = isCurrent ? t : new Date(y, m + 1, 1);
+    const booked = bookedNights(bks, start, endEx);
+    return denomDays ? booked / denomDays : null;
+  }
+
+  // Mean monthly occupancy across the rental's operating life.
+  function fullHistoryOcc(bks) {
+    const first = firstBookingDate(bks);
+    if (!first) return null;
+    const t = today0();
+    const startK = monthKey(first);
+    const endK = monthKey(t);
+    const occs = [];
+    for (let k = startK; k <= endK; k++) {
+      const y = Math.floor(k / 12), m = k % 12;
+      const o = monthOccupancy(bks, y, m);
+      if (o != null) occs.push(o);
+    }
+    if (!occs.length) return null;
+    return occs.reduce((a, v) => a + v, 0) / occs.length;
+  }
+
+  // Achieved occupancy of the last completed calendar month.
+  function previousMonthOcc(bks) {
+    const t = today0();
+    let y = t.getFullYear(), m = t.getMonth() - 1;
+    if (m < 0) { m = 11; y -= 1; }
+    // only if the rental existed then
+    const first = firstBookingDate(bks);
+    if (first && monthKey(first) > (y * 12 + m)) return null;
+    return monthOccupancy(bks, y, m);
+  }
+
   function evalAlert(bks, name) {
     const t = today0();
     if (isAttiki(name)) {
@@ -7058,6 +7118,14 @@ loadFromDb()
       // Forward occupancy
       const occ7fwd  = bookedNights(set, t, f7) / 7;
       const occ30fwd = bookedNights(set, t, f30) / 30;
+      // Backward 7-day occupancy (its own column)
+      const occ7past = bookedNights(set, daysAgo(7), t) / 7;
+
+      // Pace baselines from the rental's own booking course:
+      //  • full history = mean monthly achieved occupancy over its operating life
+      //  • previous month = achieved occupancy of the last completed month
+      const histOcc = fullHistoryOcc(set);
+      const prevMoOcc = previousMonthOcc(set);
 
       // ADR: current 30d vs prior 30d, gated on sample size (>=3 each side)
       // and on plausibility (ignore sub-€15 nightly averages that signal a
@@ -7080,8 +7148,16 @@ loadFromDb()
         category: categoryOf(name),
         occ15:   bookedNights(set, w15, t) / 15,
         occ30:   bookedNights(set, w30, t) / 30,
+        occ7past,
         occ7fwd,
         occ30fwd,
+        histOcc,
+        prevMoOcc,
+        // pace = current forward occ minus each baseline (points)
+        pace7Hist:  (histOcc   != null) ? (occ7fwd  - histOcc)   : null,
+        pace30Hist: (histOcc   != null) ? (occ30fwd - histOcc)   : null,
+        pace7Prev:  (prevMoOcc != null) ? (occ7fwd  - prevMoOcc) : null,
+        pace30Prev: (prevMoOcc != null) ? (occ30fwd - prevMoOcc) : null,
         price15: avgNightlyPrice(set, w15, t),
         price30,
         adrChange,
@@ -7094,15 +7170,8 @@ loadFromDb()
       });
     }
 
-    // Portfolio-average forward occupancy (for pace comparison)
-    const _avg7  = rows.length ? rows.reduce((a, r) => a + (r.occ7fwd  || 0), 0) / rows.length : 0;
-    const _avg30 = rows.length ? rows.reduce((a, r) => a + (r.occ30fwd || 0), 0) / rows.length : 0;
-    rows.forEach(r => {
-      r.portfAvg7  = _avg7;
-      r.portfAvg30 = _avg30;
-      r.pace7  = (r.occ7fwd  != null) ? (r.occ7fwd  - _avg7)  : null;
-      r.pace30 = (r.occ30fwd != null) ? (r.occ30fwd - _avg30) : null;
-    });
+    // (Pace now uses each rental's own history/previous-month baselines,
+    //  computed per-row above — no portfolio averaging needed.)
 
     // ── Sort: category groups first, then the chosen column within each ──
     const dir = _sortDir;
@@ -7174,6 +7243,23 @@ loadFromDb()
     return `<div style="line-height:1.3;text-align:right">
       <div class="mono" style="font-weight:600;color:${col}">${arrow}${Math.abs(p)}pts</div>
       <div style="font-size:10px;color:var(--tx3)">vs ${pct(portfolioAvg)} avg</div>
+    </div>`;
+  }
+
+  // Two-baseline pace: forward occ vs full-history avg AND vs previous month.
+  function paceDual(histDelta, histBase, prevDelta, prevBase) {
+    const line = (delta, base, tag) => {
+      if (delta == null || base == null) return `<div style="font-size:10px;color:var(--tx3)">${tag} —</div>`;
+      const p = Math.round(delta * 100);
+      const up = p >= 0;
+      const col = up ? '#1a7a4a' : '#c0392b';
+      const arrow = up ? '↑' : '↓';
+      return `<div style="font-size:11px"><span style="color:var(--tx3)">${tag}</span> <span class="mono" style="font-weight:600;color:${col}">${arrow}${Math.abs(p)}</span> <span style="font-size:9px;color:var(--tx3)">/${pct(base)}</span></div>`;
+    };
+    if (histDelta == null && prevDelta == null) return '<span style="color:var(--tx3)">—</span>';
+    return `<div style="line-height:1.35;text-align:right">
+      ${line(histDelta, histBase, 'hist')}
+      ${line(prevDelta, prevBase, 'last mo')}
     </div>`;
   }
 
@@ -7261,10 +7347,10 @@ loadFromDb()
                 <th style="cursor:pointer;user-select:none" onclick="perfSort('name')">Property${sortArrow('name')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ15')">Occ 15d${sortArrow('occ15')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ30')">Occ 30d${sortArrow('occ30')}</th>
+                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ7past')" title="Occupancy over the past 7 days">Past 7d${sortArrow('occ7past')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ7fwd')">Occ 7d fwd${sortArrow('occ7fwd')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ30fwd')">Occ 30d fwd${sortArrow('occ30fwd')}</th>
-                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('pace7')" title="Next 7 days forward occupancy vs the portfolio average">Pace 7d${sortArrow('pace7')}</th>
-                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('pace30')" title="Next 30 days forward occupancy vs the portfolio average">Pace 30d${sortArrow('pace30')}</th>
+                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('pace30Hist')" title="Next 30d forward occupancy vs this rental's full-history monthly average, and vs last completed month">Pace 30d${sortArrow('pace30Hist')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('price15')">ADR 15d${sortArrow('price15')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('price30')">ADR 30d${sortArrow('price30')}</th>
                 <th title="Deterioration signals from snapshot history">Signals</th>
@@ -7291,10 +7377,10 @@ loadFromDb()
                     <td style="font-weight:500">${r.isAttiki ? '<span title="occupancy-based alert" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button></td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
+                    <td class="r mono">${pct(r.occ7past)}</td>
                     <td class="r mono">${pct(r.occ7fwd)}</td>
                     <td class="r mono">${pct(r.occ30fwd)}</td>
-                    <td class="r">${paceChip(r.occ7fwd, r.portfAvg7)}</td>
-                    <td class="r">${paceChip(r.occ30fwd, r.portfAvg30)}</td>
+                    <td class="r">${paceDual(r.pace30Hist, r.histOcc, r.pace30Prev, r.prevMoOcc)}</td>
                     <td class="r">${priceCell(r.price15, null)}</td>
                     <td class="r">${priceCell(r.price30, r.adrChange)}</td>
                     <td>${trendBadges || '<span style="color:var(--tx3);font-size:11px">—</span>'}</td>
@@ -7308,8 +7394,8 @@ loadFromDb()
         </div>
         <div style="font-size:11px;color:var(--tx3);margin-top:10px;line-height:1.6">
           <strong>Heatmap</strong> shows each property's next 30 nights (booked / check-in-out / empty; empty gaps that trigger an alert are shaded orange/red).
-          <strong>Occ 7d/30d fwd</strong> = share of the next 7 / 30 nights already booked.
-          <strong>Pace 7d/30d</strong> = forward occupancy vs the portfolio average (↑ ahead, ↓ behind, in points).
+          <strong>Past 7d / Occ 7d-30d fwd</strong> = occupancy over the last 7 days, and share of the next 7 / 30 nights booked.
+          <strong>Pace 30d</strong> = next-30-day forward occupancy vs this rental's own full-history monthly average ("hist") and its last completed month ("last mo"), in points.
           <strong>ADR</strong> arrow (30d) = current vs prior 30-day avg price (≥3 bookings each side).
           <br><strong>Vacancy alerts</strong> — <span style="color:#C9A84C">◆</span> Attiki (day-to-day): judged on next-3-day fill — below 40% booked = <span style="color:#d68910">orange</span>, below 20% = <span style="color:#c0392b">red</span> (badge shows the % booked). Non-Attiki (longer stays): <span style="color:#d68910">orange</span> = 3+ empty nights in next 15d, <span style="color:#c0392b">red</span> = 10+ in next 20d. Red overrides orange.
           Click any header to sort. Auto-syncs every 2h.
@@ -7587,7 +7673,7 @@ loadFromDb()
           For each booking checking in within the window, we take payout ÷ nights (a per-night rate), then average those across bookings. The <strong>ADR arrow</strong> compares the current 30-day ADR to the prior 30 days (days 31–60 ago) and only appears when both periods have at least 3 bookings and a plausible (≥€15) rate — this suppresses noise from one-off bookings.
 
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Booking Pace</div>
-          Pace 7d / 30d compare this property's forward occupancy against the <strong>portfolio average</strong> forward occupancy right now. ↑ means it's pacing ahead of your other listings, ↓ behind (shown in points). It's a relative "how am I doing vs the rest of the portfolio today" signal — an honest like-for-like, not a future-vs-past comparison.
+          Pace 30d compares this property's next-30-day forward occupancy against two baselines drawn from its <strong>own booking course</strong>: its <strong>full-history monthly average</strong> (mean occupancy across every month it's operated, current month prorated) and its <strong>last completed month</strong>. Shown as two deltas in points. ↑ ahead of that baseline, ↓ behind. Note: forward occupancy is still filling, so it naturally reads a little low against completed-month baselines — read the two together for direction.
 
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Categories</div>
           Properties are grouped into <strong>Attiki</strong>, <strong>Thessaloniki</strong>, and <strong>City Escapes</strong>. Attiki + Thessaloniki are day-to-day short-stay units judged on near-term fill; City Escapes are longer-stay units judged on empty-night gaps.
@@ -7649,16 +7735,19 @@ loadFromDb()
     if (typeof XLSX === 'undefined') { if (typeof toast==='function') toast('XLSX library not loaded.','err'); return; }
     const rows = buildPerfRows();
     const aoa = [
-      ['Property', 'Attiki', 'Occ 15d', 'Occ 30d', 'Occ 7d fwd', 'Occ 30d fwd', 'Pace 7d (pts)', 'Pace 30d (pts)', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Alert', 'Alert detail'],
+      ['Property', 'Attiki', 'Occ 15d', 'Occ 30d', 'Past 7d', 'Occ 7d fwd', 'Occ 30d fwd', 'Hist avg occ', 'Pace30 vs hist', 'Prev mo occ', 'Pace30 vs prev', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Alert', 'Alert detail'],
       ...rows.map(r => [
         r.name,
         r.isAttiki ? 'Yes' : '',
         r.occ15 != null ? +(r.occ15).toFixed(4) : '',
         r.occ30 != null ? +(r.occ30).toFixed(4) : '',
+        r.occ7past != null ? +(r.occ7past).toFixed(4) : '',
         r.occ7fwd != null ? +(r.occ7fwd).toFixed(4) : '',
         r.occ30fwd != null ? +(r.occ30fwd).toFixed(4) : '',
-        r.pace7 != null ? +(r.pace7).toFixed(4) : '',
-        r.pace30 != null ? +(r.pace30).toFixed(4) : '',
+        r.histOcc != null ? +(r.histOcc).toFixed(4) : '',
+        r.pace30Hist != null ? +(r.pace30Hist).toFixed(4) : '',
+        r.prevMoOcc != null ? +(r.prevMoOcc).toFixed(4) : '',
+        r.pace30Prev != null ? +(r.pace30Prev).toFixed(4) : '',
         r.price15 != null ? +(r.price15).toFixed(2) : '',
         r.price30 != null ? +(r.price30).toFixed(2) : '',
         r.adrChange != null ? +(r.adrChange).toFixed(4) : '',
@@ -7668,13 +7757,13 @@ loadFromDb()
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const range = XLSX.utils.decode_range(ws['!ref']);
-    const pctCols = [2, 3, 4, 5, 6, 7, 10];   // occupancy + pace + adr change
-    const eurCols = [8, 9];                     // ADR prices
+    const pctCols = [2, 3, 4, 5, 6, 7, 8, 9, 10, 13];   // occupancy + baselines + pace + adr change
+    const eurCols = [11, 12];                            // ADR prices
     for (let R = 1; R <= range.e.r; R++) {
       pctCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '0%'; });
       eurCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '€#,##0.00'; });
     }
-    ws['!cols'] = [{ wch: 32 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 8 }, { wch: 12 }];
+    ws['!cols'] = [{ wch: 32 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 12 }, { wch: 13 }, { wch: 11 }, { wch: 13 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 8 }, { wch: 20 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Performance');
     const d = new Date().toISOString().slice(0, 10);
