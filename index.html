@@ -6693,37 +6693,32 @@ loadFromDb()
   let _perfLastRun = null;
   let _perfHistory = [];   // rolling daily snapshots from /api/history
 
-  // ── DETERIORATION SIGNALS — judged against the apartment's OWN history ───────
-  // Each apartment is compared to its own proven track record, not to a few days
-  // ago. This works immediately (uses booking history, no snapshot warmup) and
-  // measures "is it underperforming its normal/good state" rather than "did it
-  // wobble recently". Two signals, each checked vs BOTH baselines separately:
-  //   • Occupancy below norm — forward occ under its hist / previous-month occ
-  //   • ADR below norm       — current ADR under its hist / previous-month ADR
-  // Thresholds are how far below the baseline counts as orange / red.
+  // ── DETERIORATION SIGNALS ───────────────────────────────────────────────────
+  // Occupancy: TRUE PACE — forward occupancy now vs the same lead-time window as
+  // it stood 2 weeks and 1 month ago (reconstructed from booking `created`
+  // dates). A drop means bookings for upcoming dates are coming in slower than
+  // before — real deceleration, not the forward-vs-completed artifact.
+  // ADR: still "below own norm" (that comparison is fair — realized vs realized).
   const SIGNAL_RULES = {
-    occBelow: { orange: 0.10, red: 0.20 },   // occupancy points below baseline
+    paceDrop: { orange: 0.10, red: 0.20 },   // forward occ points below its own earlier level
     adrBelow: { orange: 0.05, red: 0.12 },   // fraction below baseline ADR
+    paceWindow: 30,                          // forward window (days) for pace
   };
 
-  // Given the already-computed deltas on a row, produce signal badges.
-  // Deltas are negative when below baseline.
   function histSignals(row) {
     const out = [];
-    const occRule = SIGNAL_RULES.occBelow;
     const adrRule = SIGNAL_RULES.adrBelow;
-    // helper to grade a "below by" magnitude against a rule
     const grade = (belowBy, rule) => belowBy >= rule.red ? 'red' : belowBy >= rule.orange ? 'orange' : null;
 
-    // Occupancy vs full history
-    if (row.pace30Hist != null && row.pace30Hist < 0) {
-      const lvl = grade(-row.pace30Hist, occRule);
-      if (lvl) out.push({ key: 'occ-hist', level: lvl, label: `occ ${Math.round(-row.pace30Hist*100)}pts < hist` });
+    // True pace vs 2 weeks ago
+    if (row.pace2w && row.pace2w.delta != null && row.pace2w.delta < 0) {
+      const lvl = grade(-row.pace2w.delta, SIGNAL_RULES.paceDrop);
+      if (lvl) out.push({ key: 'pace-2w', level: lvl, label: `pace ${Math.round(-row.pace2w.delta*100)}pts < 2wk ago` });
     }
-    // Occupancy vs previous month
-    if (row.pace30Prev != null && row.pace30Prev < 0) {
-      const lvl = grade(-row.pace30Prev, occRule);
-      if (lvl) out.push({ key: 'occ-prev', level: lvl, label: `occ ${Math.round(-row.pace30Prev*100)}pts < last mo` });
+    // True pace vs 1 month ago
+    if (row.pace1m && row.pace1m.delta != null && row.pace1m.delta < 0) {
+      const lvl = grade(-row.pace1m.delta, SIGNAL_RULES.paceDrop);
+      if (lvl) out.push({ key: 'pace-1m', level: lvl, label: `pace ${Math.round(-row.pace1m.delta*100)}pts < 1mo ago` });
     }
     // ADR vs full history
     if (row.adrPaceHist != null && row.adrPaceHist < 0) {
@@ -6980,6 +6975,62 @@ loadFromDb()
   }
 
   // Mean monthly occupancy across the rental's operating life.
+  // ── True forward pace via as-of reconstruction ──────────────────────────────
+  // Using each booking's `created` timestamp (when it hit Hosthub) and
+  // `cancelledAt`, we can rebuild what the calendar looked like on any past date:
+  // a booking "existed as of date D" if it was created on/before D and was not
+  // already cancelled by D. This lets us compare forward occupancy at EQUAL lead
+  // time ("next 30 days as booked today" vs "next 30 days as booked a month ago")
+  // — an honest apples-to-apples pace, unlike forward-vs-completed-past.
+  function _asOfMs(ref) { return ref.getTime(); }
+  function bookingExistedAsOf(b, refMs) {
+    // created is Unix seconds; fall back to check-in if missing (best effort)
+    const createdMs = (b.created != null) ? b.created * 1000
+                    : (b.createdOnChannel != null ? b.createdOnChannel * 1000 : null);
+    if (createdMs == null) return null;                 // unknown → can't reconstruct
+    if (createdMs > refMs) return false;                // not booked yet as of ref
+    const canc = (b.cancelledAt != null) ? b.cancelledAt * 1000 : null;
+    if (canc != null && canc <= refMs) return false;    // already cancelled by ref
+    return true;
+  }
+
+  // Forward-window occupancy AS OF a reference date: count distinct booked nights
+  // in [ref, ref+windowDays) using only bookings that existed as of ref.
+  function asOfForwardOcc(bks, ref, windowDays) {
+    const refMs = _asOfMs(ref);
+    const start = new Date(ref); start.setHours(0, 0, 0, 0);
+    const end = new Date(start); end.setDate(end.getDate() + windowDays);
+    const nights = new Set();
+    let anyKnown = false;
+    for (const b of bks) {
+      const existed = bookingExistedAsOf(b, refMs);
+      if (existed === null) continue;      // no timestamp → skip (don't corrupt)
+      anyKnown = true;
+      if (!existed) continue;
+      const ci = pDate(b.checkIn), co = pDate(b.checkOut);
+      if (!ci || !co) continue;
+      let night = new Date(ci);
+      while (night < co) {
+        if (night >= start && night < end) {
+          nights.add(night.getFullYear() * 10000 + night.getMonth() * 100 + night.getDate());
+        }
+        night.setDate(night.getDate() + 1);
+      }
+    }
+    return anyKnown ? nights.size / windowDays : null;   // null if we have no timestamps
+  }
+
+  // True pace: today's forward-30d occ vs the same lead-time window as it stood
+  // `daysBack` ago. Returns delta in occupancy points (positive = ahead of then).
+  function truePace(bks, daysBack, windowDays) {
+    const t = today0();
+    const nowOcc = asOfForwardOcc(bks, t, windowDays);   // = current forward occ
+    const ref = new Date(t); ref.setDate(ref.getDate() - daysBack);
+    const thenOcc = asOfForwardOcc(bks, ref, windowDays);
+    if (nowOcc == null || thenOcc == null) return null;
+    return { now: nowOcc, then: thenOcc, delta: nowOcc - thenOcc };
+  }
+
   function fullHistoryOcc(bks) {
     const first = firstBookingDate(bks);
     if (!first) return null;
@@ -7184,6 +7235,9 @@ loadFromDb()
       const prevMoAdr = previousMonthAdr(set);
       // Underpricing (light-blue): high recent demand but priced below own norm
       const underprice = evalUnderprice(set);
+      // True forward pace (as-of reconstruction) vs 2 weeks and 1 month ago
+      const pace2w = truePace(set, 14, SIGNAL_RULES.paceWindow);
+      const pace1m = truePace(set, 30, SIGNAL_RULES.paceWindow);
 
       // ADR: current 30d vs prior 30d, gated on sample size (>=3 each side)
       // and on plausibility (ignore sub-€15 nightly averages that signal a
@@ -7219,6 +7273,8 @@ loadFromDb()
         histAdr,
         prevMoAdr,
         underprice,
+        pace2w,
+        pace1m,
         adrPaceHist: (histAdr   != null && price30 != null && histAdr   > 0) ? (price30 - histAdr)   / histAdr   : null,
         adrPacePrev: (prevMoAdr != null && price30 != null && prevMoAdr > 0) ? (price30 - prevMoAdr) / prevMoAdr : null,
         price15: avgNightlyPrice(set, w15, t),
@@ -7785,9 +7841,9 @@ loadFromDb()
           A property is flagged light-blue when its <strong>past-7-day occupancy is above ${Math.round(UNDERPRICE_RULE.minOcc*100)}%</strong> (clear high demand) <strong>and</strong> its current 30-day ADR is <strong>below its own norm</strong> (the higher of its full-history average ADR and last month's ADR). Meaning: nearly always full yet priced below where it has sold before — a likely opportunity to raise the nightly rate. The badge shows the current rate and the norm to aim for.
 
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Deterioration signals (Signals column)</div>
-          These judge each apartment against its <strong>own history</strong> — flagging when current performance falls below its proven norm (not just a recent wobble). They work immediately from booking history. Two signals, each checked against both baselines:
+          Two kinds of signal, both judged against the apartment's own past — and both work today:
           <div style="margin:4px 0 0 8px">
-            • <strong>Occupancy below norm</strong> — forward occupancy ≥${P(rt.occBelow.orange)} (orange) / ${P(rt.occBelow.red)} (red) points below its full-history or last-month occupancy.<br>
+            • <strong>Pace (occupancy)</strong> — forward-30-day occupancy <em>now</em> vs the same next-30-day window as it stood 2 weeks and 1 month ago, reconstructed from each booking's creation date. A drop of ≥${P(rt.paceDrop.orange)} (orange) / ${P(rt.paceDrop.red)} (red) points means upcoming dates are booking <em>slower</em> than before — real deceleration, an honest same-lead-time comparison.<br>
             • <strong>ADR below norm</strong> — current ADR ≥${P(rt.adrBelow.orange)} (orange) / ${P(rt.adrBelow.red)} (red) below its full-history or last-month ADR.
           </div>
 
