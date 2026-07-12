@@ -6705,6 +6705,53 @@ loadFromDb()
     paceWindow: 30,                          // forward window (days) for pace
   };
 
+  // ── VERDICT ─────────────────────────────────────────────────────────────────
+  // Translates the signals a property already carries into ONE plain-language
+  // conclusion an analyst or marketer can act on. Ordered by urgency: the most
+  // actionable conclusion wins. tone: critical | opportunity | watch | healthy
+  function verdictOf(r) {
+    const a = r.alert;
+    const up = r.underprice && r.underprice.flag;
+    const trendRed = r.trendLevel === 'red';
+    const trendOrange = r.trendLevel === 'orange';
+    const paceDrop = (r.trends || []).some(t => t.key === 'pace-1m' || t.key === 'pace-2w');
+    const adrDrop = (r.trends || []).some(t => t.key === 'adr-hist' || t.key === 'adr-prev');
+
+    if (a && a.level === 'red') {
+      return { label: 'Vacant — act now', tone: 'critical',
+               action: a.mode === 'occupancy'
+                 ? `Only ${Math.round(a.occ*100)}% booked in the next few days — promote or drop price to fill.`
+                 : `${a.nights} empty nights ahead — open a promotion or lower the rate to fill the gap.` };
+    }
+    if (up) {
+      return { label: 'Underpriced — raise rate', tone: 'opportunity',
+               action: `Near-full (past 7d ${Math.round(r.underprice.occ*100)}%) but ADR €${Math.round(r.underprice.cur)} is below its norm €${Math.round(r.underprice.base)}. Raise the nightly rate.` };
+    }
+    if (trendRed || (a && a.level === 'orange')) {
+      let why = [];
+      if (paceDrop) why.push('bookings for upcoming dates are slowing');
+      if (adrDrop) why.push('the rate is below its usual level');
+      if (a && a.level === 'orange') why.push('near-term availability is opening up');
+      return { label: 'Softening — review', tone: 'watch',
+               action: (why.length ? why.join('; ') : 'underperforming its own recent norm') + '. Review pricing/visibility.' };
+    }
+    if (trendOrange) {
+      return { label: 'Watch', tone: 'watch',
+               action: 'A mild dip vs its own history — keep an eye on it, no action needed yet.' };
+    }
+    return { label: 'Healthy', tone: 'healthy',
+             action: 'Pacing and pricing in line with its own track record. No action needed.' };
+  }
+
+  function verdictBadge(v) {
+    if (!v) return '';
+    const c = v.tone === 'critical' ? { bg: 'rgba(192,57,43,.15)', bd: 'rgba(192,57,43,.4)', fg: '#e0776f' }
+            : v.tone === 'opportunity' ? { bg: 'rgba(56,152,236,.15)', bd: 'rgba(56,152,236,.4)', fg: '#3898ec' }
+            : v.tone === 'watch' ? { bg: 'rgba(214,137,16,.15)', bd: 'rgba(214,137,16,.4)', fg: '#e0a341' }
+            : { bg: 'rgba(26,122,74,.12)', bd: 'rgba(26,122,74,.3)', fg: '#3ecf8e' };
+    return `<span title="${(v.action || '').replace(/"/g, '&quot;')}" style="display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:10px;background:${c.bg};border:1px solid ${c.bd};color:${c.fg};white-space:nowrap">${v.label}</span>`;
+  }
+
   function histSignals(row) {
     const out = [];
     const adrRule = SIGNAL_RULES.adrBelow;
@@ -7292,6 +7339,7 @@ loadFromDb()
     rows.forEach(r => {
       r.trends = histSignals(r);
       r.trendLevel = trendWorst(r.trends);
+      r.verdict = verdictOf(r);
     });
 
     // (Pace now uses each rental's own history/previous-month baselines,
@@ -7489,6 +7537,7 @@ loadFromDb()
             <table class="tbl">
               <thead><tr>
                 <th style="cursor:pointer;user-select:none" onclick="perfSort('name')">Property${sortArrow('name')}</th>
+                <th title="Plain-language conclusion from all signals">Verdict</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ15')">Occ 15d${sortArrow('occ15')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ30')">Occ 30d${sortArrow('occ30')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ7past')" title="Occupancy over the past 7 days">Past 7d${sortArrow('occ7past')}</th>
@@ -7508,7 +7557,7 @@ loadFromDb()
                     if (r.category !== lastCat) {
                       lastCat = r.category;
                       const count = rows.filter(x => x.category === r.category).length;
-                      html += `<tr><td colspan="11" style="background:#0f1e2e;padding:7px 10px;font-size:11px;font-weight:600;color:#C9A84C;letter-spacing:.04em;text-transform:uppercase;border-top:2px solid var(--bdr)">${CATEGORY_LABELS[r.category] || r.category} · ${count}</td></tr>`;
+                      html += `<tr><td colspan="12" style="background:#0f1e2e;padding:7px 10px;font-size:11px;font-weight:600;color:#C9A84C;letter-spacing:.04em;text-transform:uppercase;border-top:2px solid var(--bdr)">${CATEGORY_LABELS[r.category] || r.category} · ${count}</td></tr>`;
                     }
                     const trendBadges = (r.trends || []).map(tr =>
                       `<span title="${tr.label}" style="display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;margin:1px;background:${tr.level==='red'?'rgba(192,57,43,.15)':'rgba(214,137,16,.15)'};color:${tr.level==='red'?'#e0776f':'#e0a341'};border:1px solid ${tr.level==='red'?'rgba(192,57,43,.35)':'rgba(214,137,16,.35)'}">${tr.label}</span>`
@@ -7524,6 +7573,7 @@ loadFromDb()
                     html += `
                   <tr style="${rowBg}">
                     <td style="font-weight:500">${r.isAttiki ? '<span title="occupancy-based alert" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}${upBadge} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button></td>
+                    <td>${verdictBadge(r.verdict)}</td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
                     <td class="r">${occBar(r.occ7past)}</td>
@@ -7814,7 +7864,10 @@ loadFromDb()
         </div>
         <div style="font-size:12.5px;line-height:1.7;color:#c8ccd8">
 
-          <div style="font-weight:600;color:#e8eaf0;margin:6px 0 4px">Data source</div>
+          <div style="font-weight:600;color:#e8eaf0;margin:6px 0 4px">Verdict (the plain-language column)</div>
+          The Verdict column reads all the signals for you and gives one conclusion per property: <strong style="color:#e0776f">Vacant — act now</strong> (empty soon, fill it), <strong style="color:#3898ec">Underpriced — raise rate</strong> (full but cheap), <strong style="color:#e0a341">Softening — review</strong> (demand or price sliding vs its own past), <strong style="color:#e0a341">Watch</strong> (mild dip), or <strong style="color:#3ecf8e">Healthy</strong>. Hover any verdict for the specific reason and suggested action. Start here, then use the columns to the right for the detail behind it.
+
+          <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Data source</div>
           Every number comes from your bookings synced from Hosthub. The server auto-syncs every 2 hours and stores the result; this tab reads that data. Dates are stored as D/M/YYYY. Cancelled bookings and maintenance/owner blocks are excluded from all calculations.
 
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Occupancy</div>
@@ -7890,9 +7943,11 @@ loadFromDb()
     if (typeof XLSX === 'undefined') { if (typeof toast==='function') toast('XLSX library not loaded.','err'); return; }
     const rows = buildPerfRows();
     const aoa = [
-      ['Property', 'Attiki', 'Occ 15d', 'Occ 30d', 'Past 7d', 'Occ 7d fwd', 'Occ 30d fwd', 'Hist avg occ', 'Pace30 vs hist', 'Prev mo occ', 'Pace30 vs prev', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Hist avg ADR', 'ADR vs hist', 'Prev mo ADR', 'ADR vs prev', 'Alert', 'Alert detail'],
+      ['Property', 'Verdict', 'Action', 'Attiki', 'Occ 15d', 'Occ 30d', 'Past 7d', 'Occ 7d fwd', 'Occ 30d fwd', 'Hist avg occ', 'Pace30 vs hist', 'Prev mo occ', 'Pace30 vs prev', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Hist avg ADR', 'ADR vs hist', 'Prev mo ADR', 'ADR vs prev', 'Alert', 'Alert detail'],
       ...rows.map(r => [
         r.name,
+        r.verdict ? r.verdict.label : '',
+        r.verdict ? r.verdict.action : '',
         r.isAttiki ? 'Yes' : '',
         r.occ15 != null ? +(r.occ15).toFixed(4) : '',
         r.occ30 != null ? +(r.occ30).toFixed(4) : '',
@@ -7916,13 +7971,13 @@ loadFromDb()
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const range = XLSX.utils.decode_range(ws['!ref']);
-    const pctCols = [2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 15, 17];   // occupancy + pace + adr % deltas
-    const eurCols = [11, 12, 14, 16];                            // ADR prices + ADR baselines
+    const pctCols = [4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 17, 19];   // occupancy + pace + adr % deltas
+    const eurCols = [13, 14, 16, 18];                             // ADR prices + ADR baselines
     for (let R = 1; R <= range.e.r; R++) {
       pctCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '0%'; });
       eurCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '€#,##0.00'; });
     }
-    ws['!cols'] = [{ wch: 32 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 12 }, { wch: 13 }, { wch: 11 }, { wch: 13 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 12 }, { wch: 11 }, { wch: 12 }, { wch: 11 }, { wch: 8 }, { wch: 20 }];
+    ws['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 48 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 12 }, { wch: 13 }, { wch: 11 }, { wch: 13 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 12 }, { wch: 11 }, { wch: 12 }, { wch: 11 }, { wch: 8 }, { wch: 20 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Performance');
     const d = new Date().toISOString().slice(0, 10);
