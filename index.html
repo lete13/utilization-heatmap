@@ -7377,9 +7377,9 @@ loadFromDb()
                     <td style="font-weight:500">${r.isAttiki ? '<span title="occupancy-based alert" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button></td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
-                    <td class="r mono">${pct(r.occ7past)}</td>
-                    <td class="r mono">${pct(r.occ7fwd)}</td>
-                    <td class="r mono">${pct(r.occ30fwd)}</td>
+                    <td class="r">${occBar(r.occ7past)}</td>
+                    <td class="r">${occBar(r.occ7fwd)}</td>
+                    <td class="r">${occBar(r.occ30fwd)}</td>
                     <td class="r">${paceDual(r.pace30Hist, r.histOcc, r.pace30Prev, r.prevMoOcc)}</td>
                     <td class="r">${priceCell(r.price15, null)}</td>
                     <td class="r">${priceCell(r.price30, r.adrChange)}</td>
