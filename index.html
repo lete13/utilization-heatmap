@@ -6947,6 +6947,40 @@ loadFromDb()
     return monthOccupancy(bks, y, m);
   }
 
+  // ── ADR baselines (per rental's own booking course) ─────────────────────────
+  // ADR for a specific calendar month = avg per-night rate of bookings CHECKING
+  // IN that month. Returns { adr, count } so callers can gate on sample size.
+  function monthAdrInfo(bks, y, m) {
+    const start = new Date(y, m, 1);
+    const end = new Date(y, m + 1, 1);
+    return avgNightlyPriceInfo(bks, start, end);
+  }
+  // Full-history average ADR = mean of qualifying monthly ADRs across the
+  // rental's operating life. Only months with >=3 bookings and a plausible
+  // (>=€15) rate count, so thin/noisy months don't distort the baseline.
+  function fullHistoryAdr(bks) {
+    const first = firstBookingDate(bks);
+    if (!first) return null;
+    const t = today0();
+    const startK = monthKey(first), endK = monthKey(t);
+    const adrs = [];
+    for (let k = startK; k <= endK; k++) {
+      const y = Math.floor(k / 12), m = k % 12;
+      const info = monthAdrInfo(bks, y, m);
+      if (info.avg != null && info.avg >= 15 && info.count >= 3) adrs.push(info.avg);
+    }
+    if (!adrs.length) return null;
+    return adrs.reduce((a, v) => a + v, 0) / adrs.length;
+  }
+  function previousMonthAdr(bks) {
+    const t = today0();
+    let y = t.getFullYear(), m = t.getMonth() - 1;
+    if (m < 0) { m = 11; y -= 1; }
+    const info = monthAdrInfo(bks, y, m);
+    if (info.avg != null && info.avg >= 15 && info.count >= 3) return info.avg;
+    return null;
+  }
+
   function evalAlert(bks, name) {
     const t = today0();
     if (isAttiki(name)) {
@@ -7126,6 +7160,9 @@ loadFromDb()
       //  • previous month = achieved occupancy of the last completed month
       const histOcc = fullHistoryOcc(set);
       const prevMoOcc = previousMonthOcc(set);
+      // ADR baselines (current 30d ADR vs its own history / previous month)
+      const histAdr = fullHistoryAdr(set);
+      const prevMoAdr = previousMonthAdr(set);
 
       // ADR: current 30d vs prior 30d, gated on sample size (>=3 each side)
       // and on plausibility (ignore sub-€15 nightly averages that signal a
@@ -7158,6 +7195,11 @@ loadFromDb()
         pace30Hist: (histOcc   != null) ? (occ30fwd - histOcc)   : null,
         pace7Prev:  (prevMoOcc != null) ? (occ7fwd  - prevMoOcc) : null,
         pace30Prev: (prevMoOcc != null) ? (occ30fwd - prevMoOcc) : null,
+        // ADR baselines + % deltas vs current 30d ADR
+        histAdr,
+        prevMoAdr,
+        adrPaceHist: (histAdr   != null && price30 != null && histAdr   > 0) ? (price30 - histAdr)   / histAdr   : null,
+        adrPacePrev: (prevMoAdr != null && price30 != null && prevMoAdr > 0) ? (price30 - prevMoAdr) / prevMoAdr : null,
         price15: avgNightlyPrice(set, w15, t),
         price30,
         adrChange,
@@ -7263,6 +7305,24 @@ loadFromDb()
     </div>`;
   }
 
+  // Two-baseline ADR pace: current ADR vs full-history avg AND previous month.
+  // Shows % change with the € baseline underneath each.
+  function adrPaceDual(histDelta, histBase, prevDelta, prevBase) {
+    const line = (delta, base, tag) => {
+      if (delta == null || base == null) return `<div style="font-size:10px;color:var(--tx3)">${tag} —</div>`;
+      const p = Math.round(delta * 100);
+      const up = p >= 0;
+      const col = up ? '#1a7a4a' : '#c0392b';
+      const arrow = up ? '↑' : '↓';
+      return `<div style="font-size:11px"><span style="color:var(--tx3)">${tag}</span> <span class="mono" style="font-weight:600;color:${col}">${arrow}${Math.abs(p)}%</span> <span style="font-size:9px;color:var(--tx3)">/€${Math.round(base)}</span></div>`;
+    };
+    if (histDelta == null && prevDelta == null) return '<span style="color:var(--tx3)">—</span>';
+    return `<div style="line-height:1.35;text-align:right">
+      ${line(histDelta, histBase, 'hist')}
+      ${line(prevDelta, prevBase, 'last mo')}
+    </div>`;
+  }
+
   function renderPerf() {
     const panel = document.getElementById('tab-perf');
     if (!panel) return;
@@ -7353,6 +7413,7 @@ loadFromDb()
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('pace30Hist')" title="Next 30d forward occupancy vs this rental's full-history monthly average, and vs last completed month">Pace 30d${sortArrow('pace30Hist')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('price15')">ADR 15d${sortArrow('price15')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('price30')">ADR 30d${sortArrow('price30')}</th>
+                <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('adrPaceHist')" title="Current 30d ADR vs this rental's full-history average ADR and its last completed month">ADR Pace${sortArrow('adrPaceHist')}</th>
                 <th title="Deterioration signals from snapshot history">Signals</th>
               </tr></thead>
               <tbody>
@@ -7363,7 +7424,7 @@ loadFromDb()
                     if (r.category !== lastCat) {
                       lastCat = r.category;
                       const count = rows.filter(x => x.category === r.category).length;
-                      html += `<tr><td colspan="10" style="background:#0f1e2e;padding:7px 10px;font-size:11px;font-weight:600;color:#C9A84C;letter-spacing:.04em;text-transform:uppercase;border-top:2px solid var(--bdr)">${CATEGORY_LABELS[r.category] || r.category} · ${count}</td></tr>`;
+                      html += `<tr><td colspan="11" style="background:#0f1e2e;padding:7px 10px;font-size:11px;font-weight:600;color:#C9A84C;letter-spacing:.04em;text-transform:uppercase;border-top:2px solid var(--bdr)">${CATEGORY_LABELS[r.category] || r.category} · ${count}</td></tr>`;
                     }
                     const trendBadges = (r.trends || []).map(tr =>
                       `<span title="${tr.label}" style="display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;margin:1px;background:${tr.level==='red'?'rgba(192,57,43,.15)':'rgba(214,137,16,.15)'};color:${tr.level==='red'?'#e0776f':'#e0a341'};border:1px solid ${tr.level==='red'?'rgba(192,57,43,.35)':'rgba(214,137,16,.35)'}">${tr.label}</span>`
@@ -7383,6 +7444,7 @@ loadFromDb()
                     <td class="r">${paceDual(r.pace30Hist, r.histOcc, r.pace30Prev, r.prevMoOcc)}</td>
                     <td class="r">${priceCell(r.price15, null)}</td>
                     <td class="r">${priceCell(r.price30, r.adrChange)}</td>
+                    <td class="r">${adrPaceDual(r.adrPaceHist, r.histAdr, r.adrPacePrev, r.prevMoAdr)}</td>
                     <td>${trendBadges || '<span style="color:var(--tx3);font-size:11px">—</span>'}</td>
                   </tr>`;
                   });
@@ -7396,6 +7458,7 @@ loadFromDb()
           <strong>Heatmap</strong> shows each property's next 30 nights (booked / check-in-out / empty; empty gaps that trigger an alert are shaded orange/red).
           <strong>Past 7d / Occ 7d-30d fwd</strong> = occupancy over the last 7 days, and share of the next 7 / 30 nights booked.
           <strong>Pace 30d</strong> = next-30-day forward occupancy vs this rental's own full-history monthly average ("hist") and its last completed month ("last mo"), in points.
+          <strong>ADR Pace</strong> = current 30d ADR vs the rental's own full-history average ADR and last month, in % (baseline € shown).
           <strong>ADR</strong> arrow (30d) = current vs prior 30-day avg price (≥3 bookings each side).
           <br><strong>Vacancy alerts</strong> — <span style="color:#C9A84C">◆</span> Attiki (day-to-day): judged on next-3-day fill — below 40% booked = <span style="color:#d68910">orange</span>, below 20% = <span style="color:#c0392b">red</span> (badge shows the % booked). Non-Attiki (longer stays): <span style="color:#d68910">orange</span> = 3+ empty nights in next 15d, <span style="color:#c0392b">red</span> = 10+ in next 20d. Red overrides orange.
           Click any header to sort. Auto-syncs every 2h.
@@ -7675,6 +7738,9 @@ loadFromDb()
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Booking Pace</div>
           Pace 30d compares this property's next-30-day forward occupancy against two baselines drawn from its <strong>own booking course</strong>: its <strong>full-history monthly average</strong> (mean occupancy across every month it's operated, current month prorated) and its <strong>last completed month</strong>. Shown as two deltas in points. ↑ ahead of that baseline, ↓ behind. Note: forward occupancy is still filling, so it naturally reads a little low against completed-month baselines — read the two together for direction.
 
+          <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">ADR Pace</div>
+          The same idea applied to price: current 30-day ADR vs the rental's <strong>full-history average ADR</strong> and its <strong>last completed month's ADR</strong>, shown as % changes with the € baseline. Months with fewer than 3 bookings or an implausibly low rate are excluded from the baselines, so thin months don't distort it. Useful for spotting a property priced below (or above) its own track record.
+
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Categories</div>
           Properties are grouped into <strong>Attiki</strong>, <strong>Thessaloniki</strong>, and <strong>City Escapes</strong>. Attiki + Thessaloniki are day-to-day short-stay units judged on near-term fill; City Escapes are longer-stay units judged on empty-night gaps.
 
@@ -7735,7 +7801,7 @@ loadFromDb()
     if (typeof XLSX === 'undefined') { if (typeof toast==='function') toast('XLSX library not loaded.','err'); return; }
     const rows = buildPerfRows();
     const aoa = [
-      ['Property', 'Attiki', 'Occ 15d', 'Occ 30d', 'Past 7d', 'Occ 7d fwd', 'Occ 30d fwd', 'Hist avg occ', 'Pace30 vs hist', 'Prev mo occ', 'Pace30 vs prev', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Alert', 'Alert detail'],
+      ['Property', 'Attiki', 'Occ 15d', 'Occ 30d', 'Past 7d', 'Occ 7d fwd', 'Occ 30d fwd', 'Hist avg occ', 'Pace30 vs hist', 'Prev mo occ', 'Pace30 vs prev', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Hist avg ADR', 'ADR vs hist', 'Prev mo ADR', 'ADR vs prev', 'Alert', 'Alert detail'],
       ...rows.map(r => [
         r.name,
         r.isAttiki ? 'Yes' : '',
@@ -7751,19 +7817,23 @@ loadFromDb()
         r.price15 != null ? +(r.price15).toFixed(2) : '',
         r.price30 != null ? +(r.price30).toFixed(2) : '',
         r.adrChange != null ? +(r.adrChange).toFixed(4) : '',
+        r.histAdr != null ? +(r.histAdr).toFixed(2) : '',
+        r.adrPaceHist != null ? +(r.adrPaceHist).toFixed(4) : '',
+        r.prevMoAdr != null ? +(r.prevMoAdr).toFixed(2) : '',
+        r.adrPacePrev != null ? +(r.adrPacePrev).toFixed(4) : '',
         (r.alert && r.alert.level) ? r.alert.level.toUpperCase() : '',
         (r.alert && r.alert.level) ? alertLabel(r.alert) : '',
       ])
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const range = XLSX.utils.decode_range(ws['!ref']);
-    const pctCols = [2, 3, 4, 5, 6, 7, 8, 9, 10, 13];   // occupancy + baselines + pace + adr change
-    const eurCols = [11, 12];                            // ADR prices
+    const pctCols = [2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 15, 17];   // occupancy + pace + adr % deltas
+    const eurCols = [11, 12, 14, 16];                            // ADR prices + ADR baselines
     for (let R = 1; R <= range.e.r; R++) {
       pctCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '0%'; });
       eurCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '€#,##0.00'; });
     }
-    ws['!cols'] = [{ wch: 32 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 12 }, { wch: 13 }, { wch: 11 }, { wch: 13 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 8 }, { wch: 20 }];
+    ws['!cols'] = [{ wch: 32 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 12 }, { wch: 13 }, { wch: 11 }, { wch: 13 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 12 }, { wch: 11 }, { wch: 12 }, { wch: 11 }, { wch: 8 }, { wch: 20 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Performance');
     const d = new Date().toISOString().slice(0, 10);
