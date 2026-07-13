@@ -387,7 +387,8 @@ function buildSnapshot(bookings, rentals) {
     : Object.keys(byApt).map(k => ({ id: k, name: k }));
   const dateStr = t.toISOString().slice(0, 10);
   const props = list.map(apt => {
-    const set = byApt[apt.id] || byApt[apt.name] || [];
+    const _byId = byApt[apt.id] || [], _byName = (apt.name && apt.name !== apt.id) ? (byApt[apt.name] || []) : [];
+    const set = _byId.concat(_byName);
     return {
       id: apt.id,
       occ7:  +(snapBookedNights(set, t, ahead(7)) / 7).toFixed(4),

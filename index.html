@@ -6812,8 +6812,9 @@ loadFromDb()
   // Priority: 1) your manual lists above (overrides — always win, so existing
   // judgments like "Lavrio = escape despite being in Attiki" are preserved),
   // 2) geo-distance from rental lat/lng (new listings categorize themselves),
-  // 3) city-name match, 4) default 'escape' + flagged uncategorized (least
-  // alert-noisy fallback, with a visible marker so you notice and can override).
+  // 3) city-name match, 4) if nothing is known: default 'attiki' (original
+  // behavior) with a visible "uncategorized" marker so you notice and can
+  // override via the lists.
   const GEO_REGIONS = [
     { cat: 'attiki',       lat: 37.9838, lng: 23.7275, radiusKm: 35 },  // Athens center
     { cat: 'thessaloniki', lat: 40.6401, lng: 22.9444, radiusKm: 25 },  // Thessaloniki center
@@ -6853,8 +6854,9 @@ loadFromDb()
       }
     }
     // 4) nothing known (no coords, no city yet — e.g. before the new server has
-    //    synced and backfilled location data) — default to ATTIKI, same as the
-    //    original behavior. Geo/city take over automatically once data arrives.
+    //    synced and backfilled location data) — default to ATTIKI (the original
+    //    behavior) and mark it so the table shows an "uncategorized" badge.
+    //    Geo/city take over automatically once location data arrives.
     return { cat: 'attiki', how: 'default' };
   }
   function categoryOf(apt) { return categoryInfo(apt).cat; }
@@ -7006,7 +7008,10 @@ loadFromDb()
   // minOcc) BUT its current ADR is below its own baseline (full-history avg or
   // previous-month ADR). Meaning: nearly always full yet priced below its norm —
   // a likely opportunity to raise the nightly rate. Tunable.
-  const UNDERPRICE_RULE = { lookbackDays: 7, minOcc: 0.90, minDrop: 0.0 };
+  // minOcc 0.90 over a 7-night window effectively means 7/7 nights booked
+  // (intentional: only flag when truly full). minDrop requires a meaningful
+  // gap below the norm — not a cent — before suggesting a raise.
+  const UNDERPRICE_RULE = { lookbackDays: 7, minOcc: 0.90, minDrop: 0.05 };
 
   // Returns { flag, occ, base, dropPct } or { flag:false }.
   function evalUnderprice(bks) {
@@ -7051,12 +7056,11 @@ loadFromDb()
     const t = today0();
     const isCurrent = (y === t.getFullYear() && m === t.getMonth());
     const full = daysInMonth(y, m);
-    const end = isCurrent ? t : new Date(y, m, full);          // prorate current month
-    const denomDays = isCurrent ? Math.max(1, Math.round((t - start) / 86400000)) : full;
-    // end is exclusive in bookedNights; for a full past month go to first of next month
-    const endEx = isCurrent ? t : new Date(y, m + 1, 1);
+    const elapsed = isCurrent ? Math.round((t - start) / 86400000) : full;
+    if (elapsed <= 0) return null;   // 1st of the month: nothing elapsed yet — no spurious 0%
+    const endEx = isCurrent ? t : new Date(y, m + 1, 1);   // exclusive end for bookedNights
     const booked = bookedNights(bks, start, endEx);
-    return denomDays ? booked / denomDays : null;
+    return booked / elapsed;
   }
 
   // Mean monthly occupancy across the rental's operating life.
@@ -7288,7 +7292,10 @@ loadFromDb()
     });
 
     for (const apt of list) {
-      const set = byApt[apt.id] || byApt[apt.name] || [];
+      // Merge bookings keyed by id AND by name (a booking lands in exactly one
+      // group depending on which field it carried — using || would drop one).
+      const _byId = byApt[apt.id] || [], _byName = (apt.name && apt.name !== apt.id) ? (byApt[apt.name] || []) : [];
+      const set = _byId.concat(_byName);
       const name = apt.name || apt.id;
 
       // Forward occupancy
@@ -7598,7 +7605,7 @@ loadFromDb()
                       : '';
                     html += `
                   <tr id="perf-row-${String(r.aptId||'').replace(/[^a-zA-Z0-9_-]/g,'')}" style="${rowBg}">
-                    <td style="font-weight:500">${r.isAttiki ? '<span title="city apartment (Attiki/Thessaloniki)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.categoryHow === 'uncategorized' ? ' <span title="No location data from Hosthub — defaulted to City Escapes. Add it to a category list to override." style="font-size:10px;color:#8890a8;border:1px dashed #5a627a;border-radius:8px;padding:0 5px">uncategorized</span>' : ''}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}${upBadge} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button></td>
+                    <td style="font-weight:500">${r.isAttiki ? '<span title="city apartment (Attiki/Thessaloniki)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.categoryHow === 'default' ? ' <span title="No location data from Hosthub — defaulted to Attiki. Add it to a category list to override." style="font-size:10px;color:#8890a8;border:1px dashed #5a627a;border-radius:8px;padding:0 5px">uncategorized</span>' : ''}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}${upBadge} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button></td>
                     <td>${verdictBadge(r.verdict)}</td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
@@ -7759,6 +7766,7 @@ loadFromDb()
     const bks = (_S.bks || []).filter(b => (b.aptId === aptId || b.aptName === aptName));
     const WEEKS = 13;
     const t = today0();
+    const first = firstBookingDate(bks);   // operating life starts here
     const points = [];
     for (let w = WEEKS; w >= 1; w--) {
       const start = new Date(t); start.setDate(start.getDate() - w * 7);
@@ -7767,6 +7775,9 @@ loadFromDb()
         label: `${start.getDate()}/${start.getMonth() + 1}`,
         occ: bookedNights(bks, start, end) / 7,
         adr: avgNightlyPrice(bks, start, end),
+        // Only weeks ENTIRELY before the first-ever booking are "no data".
+        // After that, an empty week is a genuine 0% — and should show as one.
+        preStart: (first == null) || (end <= first),
       });
     }
     return points;
@@ -7782,9 +7793,9 @@ loadFromDb()
     const adrMax = adrs.length ? Math.max(...adrs) * 1.15 : 100;
     const yAdr = (v) => padT + plotH - (v / (adrMax || 1)) * plotH;
 
-    // A week has "no data" if there were no bookings at all touching it
-    // (occ 0 AND adr null) — distinguish from a genuine low-occupancy week.
-    const noData = (p) => (!p.occ || p.occ === 0) && p.adr == null;
+    // "No data" = the week predates the rental's first-ever booking. An empty
+    // week AFTER that is a genuine 0% vacancy and is plotted as such.
+    const noData = (p) => !!p.preStart;
 
     // ── Gridlines: occupancy every 25% (left), ADR denser every ~1/6 (right) ──
     let grid = '';
@@ -7904,7 +7915,7 @@ loadFromDb()
           The same idea applied to price: current 30-day ADR vs the rental's <strong>full-history average ADR</strong> and its <strong>last completed month's ADR</strong>, shown as % changes with the € baseline. Months with fewer than 3 bookings or an implausibly low rate are excluded from the baselines, so thin months don't distort it. Useful for spotting a property priced below (or above) its own track record.
 
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Categories</div>
-          Properties are grouped into <strong>Attiki</strong>, <strong>Thessaloniki</strong>, and <strong>City Escapes</strong> — automatically. Priority: (1) the manual name lists in the config (always win, preserving your judgment calls), (2) the rental's coordinates from Hosthub (within 35km of Athens → Attiki, 25km of Thessaloniki → Thessaloniki, otherwise Escape), (3) its city name, (4) if nothing is known it defaults to City Escapes with an "uncategorized" marker so you can spot and override it. New listings categorize themselves the moment they sync.
+          Properties are grouped into <strong>Attiki</strong>, <strong>Thessaloniki</strong>, and <strong>City Escapes</strong> — automatically. Priority: (1) the manual name lists in the config (always win, preserving your judgment calls), (2) the rental's coordinates from Hosthub (within 35km of Athens → Attiki, 25km of Thessaloniki → Thessaloniki, otherwise Escape), (3) its city name, (4) if nothing is known it defaults to Attiki with an "uncategorized" marker so you can spot and override it. New listings categorize themselves the moment they sync.
 
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Vacancy alerts</div>
           Every category is judged on <strong>upcoming fill</strong> — same mechanism, different rhythm. <strong>Attiki & Thessaloniki</strong>: next ${ar.attiki.windows.join(' & ')} days — below ${P(ar.attiki.orange)} booked = orange, below ${P(ar.attiki.red)} = red. <strong>City Escapes</strong>: next ${ar.escape.windows.join(' & ')} days — below ${P(ar.escape.orange)} = orange, below ${P(ar.escape.red)} = red. The badge shows the % booked.<br>
@@ -7963,12 +7974,12 @@ loadFromDb()
     if (typeof XLSX === 'undefined') { if (typeof toast==='function') toast('XLSX library not loaded.','err'); return; }
     const rows = buildPerfRows();
     const aoa = [
-      ['Property', 'Verdict', 'Action', 'Attiki', 'Occ 15d', 'Occ 30d', 'Past 7d', 'Occ 7d fwd', 'Occ 30d fwd', 'Hist avg occ', 'Pace30 vs hist', 'Prev mo occ', 'Pace30 vs prev', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Hist avg ADR', 'ADR vs hist', 'Prev mo ADR', 'ADR vs prev', 'Alert', 'Alert detail'],
+      ['Property', 'Verdict', 'Action', 'Category', 'Occ 15d', 'Occ 30d', 'Past 7d', 'Occ 7d fwd', 'Occ 30d fwd', 'Hist avg occ', 'Pace30 vs hist', 'Prev mo occ', 'Pace30 vs prev', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Hist avg ADR', 'ADR vs hist', 'Prev mo ADR', 'ADR vs prev', 'Alert', 'Alert detail'],
       ...rows.map(r => [
         r.name,
         r.verdict ? r.verdict.label : '',
         r.verdict ? r.verdict.action : '',
-        r.isAttiki ? 'Yes' : '',
+        CATEGORY_LABELS[r.category] || r.category || '',
         r.occ15 != null ? +(r.occ15).toFixed(4) : '',
         r.occ30 != null ? +(r.occ30).toFixed(4) : '',
         r.occ7past != null ? +(r.occ7past).toFixed(4) : '',
