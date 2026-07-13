@@ -6852,10 +6852,10 @@ loadFromDb()
         return { cat: 'escape', how: 'city' };
       }
     }
-    // 4) nothing known — legacy behavior was attiki; keep that for plain-name
-    //    calls but mark object-calls with no data as uncategorized-escape.
-    if (typeof apt === 'string') return { cat: 'attiki', how: 'default' };
-    return { cat: 'escape', how: 'uncategorized' };
+    // 4) nothing known (no coords, no city yet — e.g. before the new server has
+    //    synced and backfilled location data) — default to ATTIKI, same as the
+    //    original behavior. Geo/city take over automatically once data arrives.
+    return { cat: 'attiki', how: 'default' };
   }
   function categoryOf(apt) { return categoryInfo(apt).cat; }
   // Occupancy-mode is now ALL categories (unified alert system).
