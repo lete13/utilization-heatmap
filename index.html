@@ -7537,7 +7537,7 @@ loadFromDb()
           <div style="margin-bottom:${orangeRows.length ? '8px' : '0'}">
             <div style="font-size:11px;font-weight:600;color:#c0392b;margin-bottom:4px">RED — critical</div>
             <div style="display:flex;flex-wrap:wrap;gap:8px">
-              ${redRows.map(r => `<span style="font-size:11px;background:rgba(192,57,43,.12);border:1px solid rgba(192,57,43,.35);border-radius:12px;padding:3px 10px">
+              ${redRows.map(r => `<span onclick="perfGoTo('${String(r.aptId||'').replace(/'/g,'')}')" style="cursor:pointer;font-size:11px;background:rgba(192,57,43,.12);border:1px solid rgba(192,57,43,.35);border-radius:12px;padding:3px 10px">
                 <strong>${r.name}</strong> · ${alertLabel(r.alert)}
               </span>`).join('')}
             </div>
@@ -7546,7 +7546,7 @@ loadFromDb()
           <div>
             <div style="font-size:11px;font-weight:600;color:#d68910;margin-bottom:4px">ORANGE — watch</div>
             <div style="display:flex;flex-wrap:wrap;gap:8px">
-              ${orangeRows.map(r => `<span style="font-size:11px;background:rgba(214,137,16,.12);border:1px solid rgba(214,137,16,.35);border-radius:12px;padding:3px 10px">
+              ${orangeRows.map(r => `<span onclick="perfGoTo('${String(r.aptId||'').replace(/'/g,'')}')" style="cursor:pointer;font-size:11px;background:rgba(214,137,16,.12);border:1px solid rgba(214,137,16,.35);border-radius:12px;padding:3px 10px">
                 <strong>${r.name}</strong> · ${alertLabel(r.alert)}
               </span>`).join('')}
             </div>
@@ -7597,7 +7597,7 @@ loadFromDb()
                       ? ` <span title="High demand (past 7d ${Math.round(r.underprice.occ*100)}% occ) but ADR €${Math.round(r.underprice.cur)} is below its norm €${Math.round(r.underprice.base)} — consider raising the rate" style="color:#3898ec;font-size:11px;font-weight:600">▲ raise €${Math.round(r.underprice.cur)}→€${Math.round(r.underprice.base)}</span>`
                       : '';
                     html += `
-                  <tr style="${rowBg}">
+                  <tr id="perf-row-${String(r.aptId||'').replace(/[^a-zA-Z0-9_-]/g,'')}" style="${rowBg}">
                     <td style="font-weight:500">${r.isAttiki ? '<span title="city apartment (Attiki/Thessaloniki)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.categoryHow === 'uncategorized' ? ' <span title="No location data from Hosthub — defaulted to City Escapes. Add it to a category list to override." style="font-size:10px;color:#8890a8;border:1px dashed #5a627a;border-radius:8px;padding:0 5px">uncategorized</span>' : ''}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}${upBadge} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button></td>
                     <td>${verdictBadge(r.verdict)}</td>
                     <td class="r">${occBar(r.occ15)}</td>
@@ -7854,6 +7854,17 @@ loadFromDb()
       ${xlabels}
     </svg>`;
   }
+
+  // Scroll to a property's row (from an alert-banner pill) and flash it.
+  window.perfGoTo = function (aptId) {
+    const el = document.getElementById('perf-row-' + String(aptId || '').replace(/[^a-zA-Z0-9_-]/g, ''));
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const prev = el.style.outline;
+    el.style.outline = '2px solid #C9A84C';
+    el.style.transition = 'outline .3s';
+    setTimeout(() => { el.style.outline = prev || 'none'; }, 1800);
+  };
 
   window.perfShowReadme = function () {
     let modal = document.getElementById('perf-readme-modal');
