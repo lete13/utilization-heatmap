@@ -598,11 +598,19 @@ function mergeApts(existing, rentals) {
   // Add any new rentals from Hosthub not already present
   rentals.forEach(r => {
     const key = r.name?.trim().toLowerCase();
+    const loc = {
+      city: r.city || null,
+      lat: r.latitude != null ? parseFloat(r.latitude) : null,
+      lng: r.longitude != null ? parseFloat(r.longitude) : null,
+    };
     if (key && !byName[key]) {
-      byName[key] = { id: r.id, name: r.name.trim() };
+      byName[key] = { id: r.id, name: r.name.trim(), ...loc };
     } else if (key && byName[key]) {
-      // Normalize the name (remove trailing spaces) but keep existing config
+      // Normalize the name and refresh location fields from Hosthub
       byName[key].name = byName[key].name.trim();
+      if (loc.city && !byName[key].city) byName[key].city = loc.city;
+      if (loc.lat != null && byName[key].lat == null) byName[key].lat = loc.lat;
+      if (loc.lng != null && byName[key].lng == null) byName[key].lng = loc.lng;
     }
   });
   return Object.values(byName).filter(a => a.name);

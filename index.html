@@ -6719,9 +6719,7 @@ loadFromDb()
 
     if (a && a.level === 'red') {
       return { label: 'Vacant — act now', tone: 'critical',
-               action: a.mode === 'occupancy'
-                 ? `Only ${Math.round(a.occ*100)}% booked in the next few days — promote or drop price to fill.`
-                 : `${a.nights} empty nights ahead — open a promotion or lower the rate to fill the gap.` };
+               action: `Only ${Math.round(a.occ*100)}% booked in the next ${a.window} days — promote or drop price to fill.` };
     }
     if (up) {
       return { label: 'Underpriced — raise rate', tone: 'opportunity',
@@ -6809,19 +6807,61 @@ loadFromDb()
   const _norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
   const _thessFrags = THESSALONIKI_APARTMENTS.map(_norm).filter(Boolean);
   const _escapeFrags = CITY_ESCAPE_APARTMENTS.map(_norm).filter(Boolean);
-  function categoryOf(name) {
+
+  // ── Auto-categorization (hybrid) ─────────────────────────────────────────────
+  // Priority: 1) your manual lists above (overrides — always win, so existing
+  // judgments like "Lavrio = escape despite being in Attiki" are preserved),
+  // 2) geo-distance from rental lat/lng (new listings categorize themselves),
+  // 3) city-name match, 4) default 'escape' + flagged uncategorized (least
+  // alert-noisy fallback, with a visible marker so you notice and can override).
+  const GEO_REGIONS = [
+    { cat: 'attiki',       lat: 37.9838, lng: 23.7275, radiusKm: 35 },  // Athens center
+    { cat: 'thessaloniki', lat: 40.6401, lng: 22.9444, radiusKm: 25 },  // Thessaloniki center
+  ];
+  const CITY_HINTS = {
+    attiki: ['athens', 'athina', 'piraeus', 'pireas', 'peiraias', 'zografou', 'kallithea', 'glyfada', 'marousi', 'nea smyrni', 'koukaki'],
+    thessaloniki: ['thessaloniki', 'salonika', 'kalamaria'],
+  };
+  function _distKm(lat1, lng1, lat2, lng2) {
+    const R = 6371, toRad = (d) => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+  // apt may be an object {name, lat, lng, city} or just a name string (back-compat)
+  function categoryInfo(apt) {
+    const name = (typeof apt === 'string') ? apt : (apt && apt.name) || '';
     const n = _norm(name);
-    if (_thessFrags.some(f => n.includes(f))) return 'thessaloniki';
-    if (_escapeFrags.some(f => n.includes(f))) return 'escape';
-    return 'attiki';
+    // 1) manual override lists — always win
+    if (_thessFrags.some(f => n.includes(f))) return { cat: 'thessaloniki', how: 'list' };
+    if (_escapeFrags.some(f => n.includes(f))) return { cat: 'escape', how: 'list' };
+    if (typeof apt === 'object' && apt) {
+      // 2) geo-distance
+      const lat = parseFloat(apt.lat), lng = parseFloat(apt.lng);
+      if (isFinite(lat) && isFinite(lng)) {
+        for (const rgn of GEO_REGIONS) {
+          if (_distKm(lat, lng, rgn.lat, rgn.lng) <= rgn.radiusKm) return { cat: rgn.cat, how: 'geo' };
+        }
+        return { cat: 'escape', how: 'geo' };  // has coords, outside both cities → escape
+      }
+      // 3) city-name hint
+      const city = _norm(apt.city);
+      if (city) {
+        if (CITY_HINTS.attiki.some(c => city.includes(c))) return { cat: 'attiki', how: 'city' };
+        if (CITY_HINTS.thessaloniki.some(c => city.includes(c))) return { cat: 'thessaloniki', how: 'city' };
+        return { cat: 'escape', how: 'city' };
+      }
+    }
+    // 4) nothing known — legacy behavior was attiki; keep that for plain-name
+    //    calls but mark object-calls with no data as uncategorized-escape.
+    if (typeof apt === 'string') return { cat: 'attiki', how: 'default' };
+    return { cat: 'escape', how: 'uncategorized' };
   }
-  // Occupancy-mode categories (near-term fill) vs gap-mode categories.
-  function usesOccupancy(name) {
-    const cat = categoryOf(name);
-    return cat === 'attiki' || cat === 'thessaloniki';
-  }
-  // Back-compat: isAttiki() now means "uses the occupancy rule" for alert logic.
-  function isAttiki(name) { return usesOccupancy(name); }
+  function categoryOf(apt) { return categoryInfo(apt).cat; }
+  // Occupancy-mode is now ALL categories (unified alert system).
+  function usesOccupancy(apt) { return true; }
+  // Back-compat: isAttiki() means "uses the occupancy rule" for alert logic.
+  function isAttiki(apt) { return usesOccupancy(apt); }
 
   const CATEGORY_LABELS = { attiki: 'Attiki', thessaloniki: 'Thessaloniki', escape: 'City Escapes' };
   const CATEGORY_ORDER = ['attiki', 'thessaloniki', 'escape'];
@@ -6834,18 +6874,16 @@ loadFromDb()
   //    (occ below `red` %  → red;  below `orange` %  → orange)
   //  • Non-Attiki (longer stays): judged on CONSECUTIVE EMPTY NIGHTS (gaps),
   //    because a real multi-night hole is the meaningful signal there.
+  // UNIFIED alert system: every category is judged on NEAR-TERM OCCUPANCY —
+  // "is enough of the upcoming window booked?" — with per-category windows and
+  // thresholds that respect each type's booking rhythm. (The old gap-based
+  // check was removed: for longer-stay escapes, scattered 3–4 night gaps are
+  // normal calendar texture and it over-flagged healthy properties. The heatmap
+  // still shows every gap visually.)
   const ALERT_RULES = {
-    attiki: {
-      mode: 'occupancy',
-      windows: [3],             // only the next 3 days matter for day-to-day units
-      orange: 0.40,             // below 40% booked → orange
-      red: 0.20,                // below 20% booked → red
-    },
-    nonAttiki: {
-      mode: 'gap',
-      orange: { window: 15, gap: 3 },
-      red: { window: 20, gap: 10 },
-    },
+    attiki:       { windows: [3],  orange: 0.40, red: 0.20 },  // day-to-day churn: next 3 days
+    thessaloniki: { windows: [3],  orange: 0.40, red: 0.20 },  // same rhythm as Attiki
+    escape:       { windows: [21], orange: 0.35, red: 0.15 },  // longer lead: next 3 weeks, lower bar
   };
 
   // ── Sort state (default: name A→Z) ──────────────────────────────────────────
@@ -7139,40 +7177,27 @@ loadFromDb()
     return null;
   }
 
-  function evalAlert(bks, name) {
+  function evalAlert(bks, apt) {
     const t = today0();
-    if (isAttiki(name)) {
-      const rules = ALERT_RULES.attiki;
-      // occupancy in each near-term window; the LOWEST fill decides severity
-      let worst = { occ: Infinity, window: null };
-      rules.windows.forEach(w => {
-        const occ = bookedNights(bks, t, daysAhead(w)) / w;
-        if (occ < worst.occ) worst = { occ, window: w };
-      });
-      // recent past occupancy for the grace check
-      const pastOcc = bookedNights(bks, daysAgo(GRACE_RULE.lookbackDays), t) / GRACE_RULE.lookbackDays;
-      const graced = pastOcc >= GRACE_RULE.minOcc;
-      if (worst.occ < rules.red) {
-        // strong recent performer → soften red to orange rather than critical
-        const level = graced ? 'orange' : 'red';
-        return { level, mode: 'occupancy', occ: worst.occ, window: worst.window, graced, pastOcc };
-      }
-      if (worst.occ < rules.orange) {
-        return { level: 'orange', mode: 'occupancy', occ: worst.occ, window: worst.window, pastOcc };
-      }
-      return { level: null, mode: 'occupancy', occ: worst.occ, window: worst.window, pastOcc };
+    const cat = categoryOf(apt);
+    const rules = ALERT_RULES[cat] || ALERT_RULES.escape;
+    // occupancy in each configured window; the LOWEST fill decides severity
+    let worst = { occ: Infinity, window: null };
+    rules.windows.forEach(w => {
+      const occ = bookedNights(bks, t, daysAhead(w)) / w;
+      if (occ < worst.occ) worst = { occ, window: w };
+    });
+    // recent past occupancy for the grace check (applies to every category)
+    const pastOcc = bookedNights(bks, daysAgo(GRACE_RULE.lookbackDays), t) / GRACE_RULE.lookbackDays;
+    const graced = pastOcc >= GRACE_RULE.minOcc;
+    if (worst.occ < rules.red) {
+      const level = graced ? 'orange' : 'red';
+      return { level, mode: 'occupancy', occ: worst.occ, window: worst.window, graced, pastOcc, cat };
     }
-    // Non-Attiki: gap-based (red wins)
-    const rules = ALERT_RULES.nonAttiki;
-    const red = longestGap(bks, t, daysAhead(rules.red.window));
-    if (red.maxGap >= rules.red.gap) {
-      return { level: 'red', mode: 'gap', nights: red.maxGap, from: red.firstGapStart };
+    if (worst.occ < rules.orange) {
+      return { level: 'orange', mode: 'occupancy', occ: worst.occ, window: worst.window, pastOcc, cat };
     }
-    const orange = longestGap(bks, t, daysAhead(rules.orange.window));
-    if (orange.maxGap >= rules.orange.gap) {
-      return { level: 'orange', mode: 'gap', nights: orange.maxGap, from: orange.firstGapStart };
-    }
-    return { level: null, mode: 'gap' };
+    return { level: null, mode: 'occupancy', occ: worst.occ, window: worst.window, pastOcc, cat };
   }
 
   // Human-readable description of an alert for banners/tooltips.
@@ -7256,7 +7281,7 @@ loadFromDb()
     }
 
     const rows = [];
-    const list = apts.length ? apts.map(a => ({ id: a.id, name: a.name })) : [];
+    const list = apts.length ? apts.map(a => ({ id: a.id, name: a.name, lat: a.lat, lng: a.lng, city: a.city })) : [];
     // include apt groups that exist in bookings but not in apts
     Object.keys(byApt).forEach(k => {
       if (!list.find(a => a.id === k || a.name === k)) list.push({ id: k, name: k });
@@ -7298,12 +7323,13 @@ loadFromDb()
         ? (cur.avg - prev.avg) / prev.avg : null;
 
       // Vacancy alert (Attiki/Thess occupancy vs Escape gap; red wins over orange)
-      const alert = evalAlert(set, name);
+      const alert = evalAlert(set, apt);
 
       rows.push({
         name,
         aptId: apt.id,
-        category: categoryOf(name),
+        category: categoryOf(apt),
+        categoryHow: categoryInfo(apt).how,
         occ15:   bookedNights(set, w15, t) / 15,
         occ30:   bookedNights(set, w30, t) / 30,
         occ7past,
@@ -7328,7 +7354,7 @@ loadFromDb()
         price30,
         adrChange,
         alert,
-        isAttiki: isAttiki(name),
+        isAttiki: categoryOf(apt) !== 'escape',
         _set: set, // keep for heatmap
         bookings: set.length,
       });
@@ -7572,7 +7598,7 @@ loadFromDb()
                       : '';
                     html += `
                   <tr style="${rowBg}">
-                    <td style="font-weight:500">${r.isAttiki ? '<span title="occupancy-based alert" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}${upBadge} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button></td>
+                    <td style="font-weight:500">${r.isAttiki ? '<span title="city apartment (Attiki/Thessaloniki)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.categoryHow === 'uncategorized' ? ' <span title="No location data from Hosthub — defaulted to City Escapes. Add it to a category list to override." style="font-size:10px;color:#8890a8;border:1px dashed #5a627a;border-radius:8px;padding:0 5px">uncategorized</span>' : ''}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}${upBadge} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button></td>
                     <td>${verdictBadge(r.verdict)}</td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
@@ -7598,7 +7624,7 @@ loadFromDb()
           <strong>Pace 30d</strong> = next-30-day forward occupancy vs this rental's own full-history monthly average ("hist") and its last completed month ("last mo"), in points.
           <strong>ADR Pace</strong> = current 30d ADR vs the rental's own full-history average ADR and last month, in % (baseline € shown).
           <strong>ADR</strong> arrow (30d) = current vs prior 30-day avg price (≥3 bookings each side).
-          <br><strong>Vacancy alerts</strong> — <span style="color:#C9A84C">◆</span> Attiki (day-to-day): judged on next-3-day fill — below 40% booked = <span style="color:#d68910">orange</span>, below 20% = <span style="color:#c0392b">red</span> (badge shows the % booked). Non-Attiki (longer stays): <span style="color:#d68910">orange</span> = 3+ empty nights in next 15d, <span style="color:#c0392b">red</span> = 10+ in next 20d. Red overrides orange.
+          <br><strong>Vacancy alerts</strong> — every category judged on upcoming fill (badge shows % booked): Attiki & Thessaloniki next 3 days (<40% <span style="color:#d68910">orange</span>, <20% <span style="color:#c0392b">red</span>); City Escapes next 21 days (<35% <span style="color:#d68910">orange</span>, <15% <span style="color:#c0392b">red</span>). A property ≥80% occupied over the past 7 days has red softened to orange.
           Click any header to sort. Auto-syncs every 2h.
         </div>`}
       </div>`;
@@ -7673,25 +7699,10 @@ loadFromDb()
       // Highlight empty runs that meet this property's alert thresholds.
       // Colour matches the property's overall alert level (red/orange).
       const alertIdx = new Set();
-      const rules = isAttiki(r.name) ? ALERT_RULES.attiki : ALERT_RULES.nonAttiki;
-      const alertColor = (r.alert && r.alert.level === 'red') ? '#7a2f2f'
-                       : (r.alert && r.alert.level === 'orange') ? '#7a5a1f' : null;
-      // Cell shading only applies to gap-mode (non-Attiki). For occupancy-mode
-      // (Attiki) there's no single "gap" to shade — the row name is tinted instead.
-      function flagRuns(winDays, gapLen) {
-        const limit = Math.min(winDays, stateArr.length);
-        let i = 0;
-        while (i < limit) {
-          if (stateArr[i] === 0) {
-            let j = i; while (j < limit && stateArr[j] === 0) j++;
-            if (j - i >= gapLen) for (let k = i; k < j; k++) alertIdx.add(k);
-            i = j;
-          } else i++;
-        }
-      }
-      if (r.alert && r.alert.mode === 'gap' && r.alert.level === 'red') flagRuns(rules.red.window, rules.red.gap);
-      else if (r.alert && r.alert.mode === 'gap' && r.alert.level === 'orange') flagRuns(rules.orange.window, rules.orange.gap);
-      const nameColor = (r.alert && r.alert.mode === 'occupancy' && r.alert.level)
+      // Unified occupancy alerts: the row name is tinted by level; gaps stay
+      // visible as dark cells (the heatmap itself shows where the holes are).
+      const alertColor = null;
+      const nameColor = (r.alert && r.alert.level)
         ? (r.alert.level === 'red' ? '#e0776f' : '#e0a341') : '#c8ccd8';
       body += `<div style="font-size:11px;color:${nameColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:6px">${r.isAttiki ? '<span style="color:#C9A84C">◆</span> ' : ''}${r.name}</div>`;
       stateArr.forEach((s, i) => {
@@ -7712,8 +7723,7 @@ loadFromDb()
           <span style="display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#1a7a4a;display:inline-block"></span>Booked</span>
           <span style="display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#C9A84C;display:inline-block"></span>Check-in / out</span>
           <span style="display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#242c3f;display:inline-block"></span>Empty</span>
-          <span style="display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#7a5a1f;display:inline-block"></span>Orange alert gap</span>
-          <span style="display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:#7a2f2f;display:inline-block"></span>Red alert gap</span>
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:13px;height:13px;border-radius:3px;background:transparent;border:1px solid #e0776f;display:inline-block"></span>Row name tinted = vacancy alert</span>
         </div>`;
   }
 
@@ -7883,11 +7893,10 @@ loadFromDb()
           The same idea applied to price: current 30-day ADR vs the rental's <strong>full-history average ADR</strong> and its <strong>last completed month's ADR</strong>, shown as % changes with the € baseline. Months with fewer than 3 bookings or an implausibly low rate are excluded from the baselines, so thin months don't distort it. Useful for spotting a property priced below (or above) its own track record.
 
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Categories</div>
-          Properties are grouped into <strong>Attiki</strong>, <strong>Thessaloniki</strong>, and <strong>City Escapes</strong>. Attiki + Thessaloniki are day-to-day short-stay units judged on near-term fill; City Escapes are longer-stay units judged on empty-night gaps.
+          Properties are grouped into <strong>Attiki</strong>, <strong>Thessaloniki</strong>, and <strong>City Escapes</strong> — automatically. Priority: (1) the manual name lists in the config (always win, preserving your judgment calls), (2) the rental's coordinates from Hosthub (within 35km of Athens → Attiki, 25km of Thessaloniki → Thessaloniki, otherwise Escape), (3) its city name, (4) if nothing is known it defaults to City Escapes with an "uncategorized" marker so you can spot and override it. New listings categorize themselves the moment they sync.
 
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Vacancy alerts</div>
-          <strong>Attiki & Thessaloniki</strong> (occupancy-based): the next ${ar.attiki.windows.join(' & ')} day window — below ${P(ar.attiki.orange)} booked = orange, below ${P(ar.attiki.red)} = red. The badge shows the % booked.<br>
-          <strong>City Escapes</strong> (gap-based): ${ar.nonAttiki.orange.gap}+ empty nights in the next ${ar.nonAttiki.orange.window} days = orange; ${ar.nonAttiki.red.gap}+ empty nights in the next ${ar.nonAttiki.red.window} days = red.<br>
+          Every category is judged on <strong>upcoming fill</strong> — same mechanism, different rhythm. <strong>Attiki & Thessaloniki</strong>: next ${ar.attiki.windows.join(' & ')} days — below ${P(ar.attiki.orange)} booked = orange, below ${P(ar.attiki.red)} = red. <strong>City Escapes</strong>: next ${ar.escape.windows.join(' & ')} days — below ${P(ar.escape.orange)} = orange, below ${P(ar.escape.red)} = red. The badge shows the % booked.<br>
           <strong>Recent-strength grace:</strong> if an occupancy-based property was ≥${P(gr.minOcc)} occupied over the past ${gr.lookbackDays} days, a red alert is softened to orange — a proven performer with a short-term dip isn't treated as critical.
 
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Underpricing alert (light-blue)</div>
@@ -7901,7 +7910,7 @@ loadFromDb()
           </div>
 
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">Heatmap</div>
-          Each property's next 30 nights: green = booked, gold = check-in/out day, dark = empty. Empty gaps that trigger a gap-based alert are shaded orange/red. Mondays are labelled in gold.
+          Each property's next 30 nights: green = booked, gold = check-in/out day, dark = empty (every gap stays visible here). A property with a vacancy alert has its name tinted orange/red. Mondays are labelled in gold.
 
           <div style="font-weight:600;color:#e8eaf0;margin:14px 0 4px">3-month course chart (📈)</div>
           Weekly actual occupancy (gold, left axis) and ADR (teal, right axis) over the last 13 weeks. Weeks with no bookings at all are shown as dotted "no data" segments rather than a misleading drop to zero.
