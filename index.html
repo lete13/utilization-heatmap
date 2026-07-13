@@ -7039,6 +7039,21 @@ loadFromDb()
   function monthKey(d) { return d.getFullYear() * 12 + d.getMonth(); }
   function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
 
+  // Days since the most recent booking LANDED (by `created` timestamp — when
+  // the reservation was made, not its check-in). Passive momentum metric, no
+  // alert. Returns null until bookings carry `created` (post server-redeploy).
+  function daysSinceLastBooking(bks) {
+    let latest = null;
+    for (const b of bks) {
+      if (b.cancelled) continue;
+      const ts = (b.created != null) ? b.created * 1000
+               : (b.createdOnChannel != null ? b.createdOnChannel * 1000 : null);
+      if (ts != null && (latest == null || ts > latest)) latest = ts;
+    }
+    if (latest == null) return null;
+    return Math.max(0, Math.floor((Date.now() - latest) / 86400000));
+  }
+
   function firstBookingDate(bks) {
     let min = null;
     for (const b of bks) {
@@ -7317,6 +7332,7 @@ loadFromDb()
       // True forward pace (as-of reconstruction) vs 2 weeks and 1 month ago
       const pace2w = truePace(set, 14, SIGNAL_RULES.paceWindow);
       const pace1m = truePace(set, 30, SIGNAL_RULES.paceWindow);
+      const lastBookingDays = daysSinceLastBooking(set);
 
       // ADR: current 30d vs prior 30d, gated on sample size (>=3 each side)
       // and on plausibility (ignore sub-€15 nightly averages that signal a
@@ -7355,6 +7371,7 @@ loadFromDb()
         underprice,
         pace2w,
         pace1m,
+        lastBookingDays,
         adrPaceHist: (histAdr   != null && price30 != null && histAdr   > 0) ? (price30 - histAdr)   / histAdr   : null,
         adrPacePrev: (prevMoAdr != null && price30 != null && prevMoAdr > 0) ? (price30 - prevMoAdr) / prevMoAdr : null,
         price15: avgNightlyPrice(set, w15, t),
@@ -7605,7 +7622,7 @@ loadFromDb()
                       : '';
                     html += `
                   <tr id="perf-row-${String(r.aptId||'').replace(/[^a-zA-Z0-9_-]/g,'')}" style="${rowBg}">
-                    <td style="font-weight:500">${r.isAttiki ? '<span title="city apartment (Attiki/Thessaloniki)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.categoryHow === 'default' ? ' <span title="No location data from Hosthub — defaulted to Attiki. Add it to a category list to override." style="font-size:10px;color:#8890a8;border:1px dashed #5a627a;border-radius:8px;padding:0 5px">uncategorized</span>' : ''}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}${upBadge} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button></td>
+                    <td style="font-weight:500">${r.isAttiki ? '<span title="city apartment (Attiki/Thessaloniki)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.categoryHow === 'default' ? ' <span title="No location data from Hosthub — defaulted to Attiki. Add it to a category list to override." style="font-size:10px;color:#8890a8;border:1px dashed #5a627a;border-radius:8px;padding:0 5px">uncategorized</span>' : ''}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}${upBadge} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button>${r.lastBookingDays != null ? `<div style="font-size:10px;color:var(--tx3);margin-top:1px" title="Days since the most recent reservation was made (any dates)">last booking ${r.lastBookingDays === 0 ? 'today' : r.lastBookingDays + 'd ago'}</div>` : ''}</td>
                     <td>${verdictBadge(r.verdict)}</td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
@@ -7974,12 +7991,13 @@ loadFromDb()
     if (typeof XLSX === 'undefined') { if (typeof toast==='function') toast('XLSX library not loaded.','err'); return; }
     const rows = buildPerfRows();
     const aoa = [
-      ['Property', 'Verdict', 'Action', 'Category', 'Occ 15d', 'Occ 30d', 'Past 7d', 'Occ 7d fwd', 'Occ 30d fwd', 'Hist avg occ', 'Pace30 vs hist', 'Prev mo occ', 'Pace30 vs prev', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Hist avg ADR', 'ADR vs hist', 'Prev mo ADR', 'ADR vs prev', 'Alert', 'Alert detail'],
+      ['Property', 'Verdict', 'Action', 'Category', 'Last booking (days ago)', 'Occ 15d', 'Occ 30d', 'Past 7d', 'Occ 7d fwd', 'Occ 30d fwd', 'Hist avg occ', 'Pace30 vs hist', 'Prev mo occ', 'Pace30 vs prev', 'ADR 15d', 'ADR 30d', 'ADR Δ', 'Hist avg ADR', 'ADR vs hist', 'Prev mo ADR', 'ADR vs prev', 'Alert', 'Alert detail'],
       ...rows.map(r => [
         r.name,
         r.verdict ? r.verdict.label : '',
         r.verdict ? r.verdict.action : '',
         CATEGORY_LABELS[r.category] || r.category || '',
+        r.lastBookingDays != null ? r.lastBookingDays : '',
         r.occ15 != null ? +(r.occ15).toFixed(4) : '',
         r.occ30 != null ? +(r.occ30).toFixed(4) : '',
         r.occ7past != null ? +(r.occ7past).toFixed(4) : '',
@@ -8002,13 +8020,13 @@ loadFromDb()
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const range = XLSX.utils.decode_range(ws['!ref']);
-    const pctCols = [4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 17, 19];   // occupancy + pace + adr % deltas
-    const eurCols = [13, 14, 16, 18];                             // ADR prices + ADR baselines
+    const pctCols = [5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 18, 20];   // occupancy + pace + adr % deltas
+    const eurCols = [14, 15, 17, 19];                               // ADR prices + ADR baselines
     for (let R = 1; R <= range.e.r; R++) {
       pctCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '0%'; });
       eurCols.forEach(C => { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && typeof c.v === 'number') c.z = '€#,##0.00'; });
     }
-    ws['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 48 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 12 }, { wch: 13 }, { wch: 11 }, { wch: 13 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 12 }, { wch: 11 }, { wch: 12 }, { wch: 11 }, { wch: 8 }, { wch: 20 }];
+    ws['!cols'] = [{ wch: 30 }, { wch: 22 }, { wch: 48 }, { wch: 13 }, { wch: 10 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 11 }, { wch: 11 }, { wch: 12 }, { wch: 13 }, { wch: 11 }, { wch: 13 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 12 }, { wch: 11 }, { wch: 12 }, { wch: 11 }, { wch: 8 }, { wch: 20 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Performance');
     const d = new Date().toISOString().slice(0, 10);
