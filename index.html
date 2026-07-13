@@ -4576,6 +4576,24 @@ async function startSync() {
       _mismatches.forEach(([hosthub,local])=>syncLog('  "'+hosthub+'" → "'+local+'"','warn'));
     }
 
+    // Backfill location data (city / lat / lng) from the Hosthub rentals in the
+    // sync stream. This powers auto-categorization (Attiki / Thessaloniki /
+    // City Escapes) and prevents manual syncs from wiping coordinates the
+    // server-side auto-sync backfilled.
+    if (Array.isArray(finalData.rentals)) {
+      let _locFilled = 0;
+      for (const r of finalData.rentals) {
+        if (!r || !r.name) continue;
+        const apt = findApt(r.name);
+        if (!apt) continue;
+        if (r.city && !apt.city) apt.city = r.city;
+        const _la = parseFloat(r.latitude), _ln = parseFloat(r.longitude);
+        if (isFinite(_la) && (apt.lat == null || apt.lat === '')) { apt.lat = _la; _locFilled++; }
+        if (isFinite(_ln) && (apt.lng == null || apt.lng === '')) { apt.lng = _ln; }
+      }
+      if (_locFilled) syncLog(`Location data added for ${_locFilled} properties (auto-categorization).`, 'ok');
+    }
+
     const nNew = S.apts.length - prevApts;
     localStorage.setItem('hh_last_sync', new Date().toISOString());
     save();
