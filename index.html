@@ -6837,6 +6837,46 @@ loadFromDb()
     { cat: 'attiki',       lat: 37.9838, lng: 23.7275, radiusKm: 35 },  // Athens center
     { cat: 'thessaloniki', lat: 40.6401, lng: 22.9444, radiusKm: 25 },  // Thessaloniki center
   ];
+  // ── Metro routes (for proximity ordering) ───────────────────────────────────
+  // Apartments are ordered by their NEAREST station, following the station
+  // sequence along the lines — so units near consecutive stops sit together.
+  // Coordinates are approximate (fine for nearest-station picking); edit freely.
+  const METRO_ROUTES = {
+    attiki: [
+      // Line 1 (green) Piraeus → Kifissia
+      {n:'Piraeus',lat:37.9480,lng:23.6430},{n:'Faliro',lat:37.9451,lng:23.6650},{n:'Moschato',lat:37.9550,lng:23.6800},
+      {n:'Kallithea',lat:37.9603,lng:23.6970},{n:'Tavros',lat:37.9625,lng:23.7035},{n:'Petralona',lat:37.9686,lng:23.7093},
+      {n:'Thissio',lat:37.9767,lng:23.7208},{n:'Monastiraki',lat:37.9761,lng:23.7256},{n:'Omonia',lat:37.9842,lng:23.7281},
+      {n:'Victoria',lat:37.9932,lng:23.7305},{n:'Attiki',lat:37.9994,lng:23.7226},{n:'Agios Nikolaos',lat:38.0069,lng:23.7276},
+      {n:'Kato Patissia',lat:38.0117,lng:23.7286},{n:'Agios Eleftherios',lat:38.0201,lng:23.7318},{n:'Ano Patissia',lat:38.0238,lng:23.7360},
+      {n:'Perissos',lat:38.0326,lng:23.7448},{n:'Pefkakia',lat:38.0370,lng:23.7500},{n:'Nea Ionia',lat:38.0410,lng:23.7550},
+      {n:'Iraklio',lat:38.0462,lng:23.7660},{n:'Irini',lat:38.0432,lng:23.7830},{n:'Neratziotissa',lat:38.0448,lng:23.7929},
+      {n:'Maroussi',lat:38.0561,lng:23.8050},{n:'KAT',lat:38.0660,lng:23.8040},{n:'Kifissia',lat:38.0736,lng:23.8080},
+      // Line 2 (red) Anthoupoli → Elliniko
+      {n:'Anthoupoli',lat:38.0170,lng:23.6910},{n:'Peristeri',lat:38.0130,lng:23.6960},{n:'Agios Antonios',lat:38.0066,lng:23.6996},
+      {n:'Sepolia',lat:38.0027,lng:23.7135},{n:'Larissa Station',lat:37.9920,lng:23.7210},{n:'Metaxourghio',lat:37.9860,lng:23.7210},
+      {n:'Panepistimio',lat:37.9800,lng:23.7330},{n:'Syntagma',lat:37.9755,lng:23.7349},{n:'Akropoli',lat:37.9686,lng:23.7295},
+      {n:'Syngrou-Fix',lat:37.9642,lng:23.7266},{n:'Neos Kosmos',lat:37.9573,lng:23.7286},{n:'Agios Ioannis',lat:37.9566,lng:23.7346},
+      {n:'Dafni',lat:37.9494,lng:23.7373},{n:'Agios Dimitrios',lat:37.9406,lng:23.7406},{n:'Ilioupoli',lat:37.9300,lng:23.7444},
+      {n:'Alimos',lat:37.9180,lng:23.7440},{n:'Argyroupoli',lat:37.9030,lng:23.7460},{n:'Elliniko',lat:37.8926,lng:23.7476},
+      // Line 3 (blue) Dimotiko Theatro → Doukissis Plakentias
+      {n:'Dimotiko Theatro',lat:37.9430,lng:23.6470},{n:'Maniatika',lat:37.9540,lng:23.6400},{n:'Nikaia',lat:37.9650,lng:23.6470},
+      {n:'Korydallos',lat:37.9770,lng:23.6520},{n:'Agia Varvara',lat:37.9850,lng:23.6590},{n:'Agia Marina',lat:37.9885,lng:23.6660},
+      {n:'Egaleo',lat:37.9920,lng:23.6820},{n:'Eleonas',lat:37.9880,lng:23.6940},{n:'Kerameikos',lat:37.9785,lng:23.7115},
+      {n:'Evangelismos',lat:37.9764,lng:23.7470},{n:'Megaro Mousikis',lat:37.9793,lng:23.7527},{n:'Ambelokipi',lat:37.9873,lng:23.7570},
+      {n:'Panormou',lat:37.9932,lng:23.7635},{n:'Katehaki',lat:37.9930,lng:23.7760},{n:'Ethniki Amyna',lat:38.0000,lng:23.7855},
+      {n:'Holargos',lat:38.0043,lng:23.7940},{n:'Nomismatokopio',lat:38.0095,lng:23.8050},{n:'Agia Paraskevi',lat:38.0170,lng:23.8120},
+      {n:'Chalandri',lat:38.0230,lng:23.7940},{n:'Doukissis Plakentias',lat:38.0240,lng:23.8330},
+    ],
+    thessaloniki: [
+      {n:'New Railway Station',lat:40.6440,lng:22.9290},{n:'Dimokratias',lat:40.6410,lng:22.9350},{n:'Venizelou',lat:40.6380,lng:22.9410},
+      {n:'Agia Sofia',lat:40.6340,lng:22.9460},{n:'Sintrivani',lat:40.6300,lng:22.9530},{n:'Panepistimio',lat:40.6280,lng:22.9590},
+      {n:'Papafi',lat:40.6230,lng:22.9640},{n:'Efkleidis',lat:40.6190,lng:22.9680},{n:'Fleming',lat:40.6150,lng:22.9700},
+      {n:'Analipsi',lat:40.6110,lng:22.9720},{n:'25 Martiou',lat:40.6060,lng:22.9740},{n:'Voulgari',lat:40.6010,lng:22.9760},
+      {n:'Nea Elvetia',lat:40.5960,lng:22.9790},
+    ],
+  };
+
   const CITY_HINTS = {
     attiki: ['athens', 'athina', 'piraeus', 'pireas', 'peiraias', 'zografou', 'kallithea', 'glyfada', 'marousi', 'nea smyrni', 'koukaki'],
     thessaloniki: ['thessaloniki', 'salonika', 'kalamaria'],
@@ -7411,20 +7451,36 @@ loadFromDb()
       r.verdict = verdictOf(r);
     });
 
-    // Geographic proximity order (default): within each category, a
-    // nearest-neighbor chain — start at the northernmost apartment, repeatedly
-    // append the closest unvisited one — so physical neighbors (Victoria Sq,
-    // Attiki metro, the Piraeus cluster…) sit next to each other in the table
-    // and heatmap. Apartments without coordinates go last, alphabetically.
+    // Proximity order (default): Attiki & Thessaloniki apartments are ordered by
+    // their NEAREST METRO STATION, following the station sequence along the
+    // lines — so units near consecutive stops (Victoria → Attiki…) sit together
+    // in the table and heatmap; ties at the same station break by distance to
+    // it. City Escapes (no metro) use a nearest-neighbor chain instead.
+    // Apartments without coordinates go last, alphabetically.
     (function assignProximity() {
       const cats = {};
       rows.forEach(r => { (cats[r.category] = cats[r.category] || []).push(r); });
-      Object.values(cats).forEach(group => {
+      Object.entries(cats).forEach(([cat, group]) => {
         const withC = group.filter(r => isFinite(parseFloat(r.lat)) && isFinite(parseFloat(r.lng)));
         const noC = group.filter(r => !withC.includes(r))
                          .sort((a, b) => String(a.name).localeCompare(String(b.name)));
         let rank = 0;
-        if (withC.length) {
+        const stations = METRO_ROUTES[cat];
+        if (stations && withC.length) {
+          // nearest station index + distance to it, then order along the route
+          withC.forEach(r => {
+            let bi = 0, bd = Infinity;
+            const la = parseFloat(r.lat), ln = parseFloat(r.lng);
+            stations.forEach((st, i) => {
+              const d = _distKm(la, ln, st.lat, st.lng);
+              if (d < bd) { bd = d; bi = i; }
+            });
+            r._stIdx = bi; r._stDist = bd; r.nearestStation = stations[bi].n;
+          });
+          withC.sort((a, b) => (a._stIdx - b._stIdx) || (a._stDist - b._stDist));
+          withC.forEach(r => { r.proxRank = rank++; });
+        } else if (withC.length) {
+          // escapes: nearest-neighbor chain from the northernmost apartment
           let cur = withC.reduce((m, r) => parseFloat(r.lat) > parseFloat(m.lat) ? r : m, withC[0]);
           const left = new Set(withC);
           while (cur) {
@@ -7679,7 +7735,7 @@ loadFromDb()
                       : '';
                     html += `
                   <tr id="perf-row-${String(r.aptId||'').replace(/[^a-zA-Z0-9_-]/g,'')}" style="${rowBg}">
-                    <td style="font-weight:500">${r.isAttiki ? '<span title="city apartment (Attiki/Thessaloniki)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.categoryHow === 'default' ? ' <span title="No location data from Hosthub — defaulted to Attiki. Add it to a category list to override." style="font-size:10px;color:#8890a8;border:1px dashed #5a627a;border-radius:8px;padding:0 5px">uncategorized</span>' : ''}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}${upBadge} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button>${r.lastBookingDays != null ? `<div style="font-size:10px;color:var(--tx3);margin-top:1px" title="Days since the most recent reservation was made (any dates)">last booking ${r.lastBookingDays === 0 ? 'today' : r.lastBookingDays + 'd ago'}</div>` : ''}</td>
+                    <td style="font-weight:500">${r.isAttiki ? '<span title="city apartment (Attiki/Thessaloniki)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.categoryHow === 'default' ? ' <span title="No location data from Hosthub — defaulted to Attiki. Add it to a category list to override." style="font-size:10px;color:#8890a8;border:1px dashed #5a627a;border-radius:8px;padding:0 5px">uncategorized</span>' : ''}${r.alert && r.alert.level ? ` <span title="${alertLabel(r.alert)}" style="color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>` : ''}${upBadge} <button onclick="perfShowCourse('${String(r.aptId||'').replace(/'/g,'')}','${r.name.replace(/'/g,'&#39;')}')" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button>${(r.nearestStation || r.lastBookingDays != null) ? `<div style="font-size:10px;color:var(--tx3);margin-top:1px">${r.nearestStation ? `<span title="Nearest metro station (drives the default row order)">Ⓜ ${r.nearestStation}</span>` : ''}${r.nearestStation && r.lastBookingDays != null ? ' · ' : ''}${r.lastBookingDays != null ? `<span title="Days since the most recent reservation was made (any dates)">last booking ${r.lastBookingDays === 0 ? 'today' : r.lastBookingDays + 'd ago'}</span>` : ''}</div>` : ''}</td>
                     <td>${verdictBadge(r.verdict)}</td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
