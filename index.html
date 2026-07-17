@@ -5600,8 +5600,12 @@ function _opsAutoRows(date) {
   const [_y,_m,_d] = date.split('-');
   const dateFmt = parseInt(_d)+'/'+parseInt(_m)+'/'+_y; // e.g. "22/6/2026"
   const checkouts = S.bks.filter(b => b.checkOut === date || b.checkOut === dateFmt);
-  // Sort by aptName
-  checkouts.sort((a,b) => (a.aptName||'').localeCompare(b.aptName||''));
+  // Sort by metro proximity (falls back to A→Z until coordinates exist)
+  if (typeof window.aptProximityCompare === 'function') {
+    checkouts.sort((a,b) => window.aptProximityCompare(_opsAptOf(a), _opsAptOf(b)));
+  } else {
+    checkouts.sort((a,b) => (a.aptName||'').localeCompare(b.aptName||''));
+  }
   checkouts.forEach(bk => {
     const key = bk.aptId||bk.aptName;
     if (seen.has(key)) return;
@@ -5646,12 +5650,21 @@ function _opsAutoRows(date) {
   return rows;
 }
 
+// Metro-proximity ordering for Daily Ops rows (same order as Performance tab).
+function _opsAptOf(r) {
+  return S.apts.find(a => a.id === (r.aptId)) || S.apts.find(a => a.name === (r.aptName)) || { name: r.aptName };
+}
+function _opsSortRows(rows) {
+  if (typeof window.aptProximityCompare !== 'function') return rows;
+  return rows.slice().sort((a, b) => window.aptProximityCompare(_opsAptOf(a), _opsAptOf(b)));
+}
+
 function _opsLoadData(date) {
   _opsEnsure();
   const snap = S.daily.snapshots[date];
   const freshRows = _opsAutoRows(date);
 
-  if (!snap) return { rows: freshRows, notes: '', savedAt: null };
+  if (!snap) return { rows: _opsSortRows(freshRows), notes: '', savedAt: null };
 
   // Merge: start from snapshot rows, append any new bookings not yet in snapshot
   const snapAptIds = new Set(snap.rows.map(r => r.aptId||r.aptName));
@@ -5666,7 +5679,7 @@ function _opsLoadData(date) {
   }
 
   return {
-    rows: [...snap.rows, ...newRows],
+    rows: _opsSortRows([...snap.rows, ...newRows]),
     notes: snap.notes||'',
     savedAt: snap.savedAt,
   };
@@ -5723,7 +5736,7 @@ function _opsBuildRow(row, i) {
   const lTxt = row.lateCheckout ? '\u26a0 LATE CO' : 'Late CO';
   return `<tr style="background:${bg}">
     <td style="padding:4px 6px;border:1px solid #ddd;text-align:center;font-size:11px;color:#666">${i+1}</td>
-    <td style="padding:4px 8px;border:1px solid #ddd;font-size:12px;font-weight:600;color:#1a1a2e">${row.aptName}</td>
+    <td style="padding:4px 8px;border:1px solid #ddd;font-size:12px;font-weight:600;color:#1a1a2e">${row.aptName}${(function(){const mi=(typeof window.aptMetroInfo==='function')?window.aptMetroInfo(_opsAptOf(row)):null;return (mi&&mi.station)?'<div style="font-size:10px;font-weight:400;color:#9CA3AF" title="Nearest metro station (drives the row order)">Ⓜ '+mi.station+'</div>':'';})()}</td>
     <td style="padding:4px 6px;border:1px solid #ddd;text-align:center">
       <button onclick="opsToggleLate(${i})"
         style="background:${lBg};border:${lBrd};border-radius:4px;padding:3px 8px;font-size:10px;font-weight:700;color:${lClr};cursor:pointer;white-space:nowrap;font-family:inherit">
@@ -5983,6 +5996,16 @@ async function opsCopyImage() {
   }
 }
 
+// Manual refresh: run the app's real Hosthub sync (saves to DB, rebuilds S.bks),
+// then re-render the ops board with the fresh data.
+async function opsManualRefresh() {
+  if (typeof toast === 'function') toast('Syncing from Hosthub…');
+  try { if (typeof startSync === 'function') await startSync(); }
+  catch (e) { /* sync may be busy — still re-render with whatever we have */ }
+  renderOps();
+  if (typeof toast === 'function') toast('Daily Ops refreshed.', 'ok');
+}
+
 function renderOps() {
   const el = document.getElementById('tab-ops');
   if (!el) return;
@@ -6027,6 +6050,7 @@ function renderOps() {
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           ${snapLabel ? `<span style="font-size:11px;color:var(--tx3)">💾 ${snapLabel}</span>` : ''}
+          <button class="btn sm" onclick="opsManualRefresh()" title="Pull fresh bookings from Hosthub and rebuild today's list" style="padding:5px 12px">🔄 Refresh</button>
           <button class="btn sm" onclick="opsSaveSnapshot()" style="border-color:#1a7a4a;color:#1a7a4a;padding:5px 12px">💾 Snapshot</button>
           <button class="btn sm" onclick="opsCopyImage()" style="border-color:#7C3AED;color:#7C3AED;padding:5px 12px">📋 Copy Image</button>
         </div>
@@ -6918,6 +6942,28 @@ loadFromDb()
     return { cat: 'attiki', how: 'default' };
   }
   function categoryOf(apt) { return categoryInfo(apt).cat; }
+
+  // Exposed for other tabs (Daily Ops): nearest metro station + proximity order.
+  window.aptMetroInfo = function (apt) {
+    if (!apt) return null;
+    const cat = categoryOf(apt);
+    const stations = METRO_ROUTES[cat];
+    const la = parseFloat(apt.lat), ln = parseFloat(apt.lng);
+    if (!stations || !isFinite(la) || !isFinite(ln)) return { cat, idx: null, station: null, dist: null };
+    let bi = 0, bd = Infinity;
+    stations.forEach((st, i) => { const d = _distKm(la, ln, st.lat, st.lng); if (d < bd) { bd = d; bi = i; } });
+    return { cat, idx: bi, station: stations[bi].n, dist: bd };
+  };
+  window.aptProximityCompare = function (a, b) {
+    const rank = (x) => ({ attiki: 0, thessaloniki: 1, escape: 2 }[x] ?? 3);
+    const ia = window.aptMetroInfo(a) || {}, ib = window.aptMetroInfo(b) || {};
+    if (rank(ia.cat) !== rank(ib.cat)) return rank(ia.cat) - rank(ib.cat);
+    const xa = ia.idx == null ? 1e9 : ia.idx, xb = ib.idx == null ? 1e9 : ib.idx;
+    if (xa !== xb) return xa - xb;
+    const da = ia.dist == null ? 0 : ia.dist, db = ib.dist == null ? 0 : ib.dist;
+    if (da !== db) return da - db;
+    return String((a && a.name) || '').localeCompare(String((b && b.name) || ''));
+  };
   // Occupancy-mode is now ALL categories (unified alert system).
   function usesOccupancy(apt) { return true; }
   // Back-compat: isAttiki() means "uses the occupancy rule" for alert logic.
