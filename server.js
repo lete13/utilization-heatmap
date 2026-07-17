@@ -206,6 +206,40 @@ app.get('/api/db/data', async (req, res) => {
   }
 });
 
+// POST /api/booking-notes — batch-fetch Hosthub notes for a set of reservations.
+// Body: { ids: ["ce123", ...] } → { ce123: [{content, created, by}], ... }
+// One Hosthub call per id (their API has no bulk endpoint), limited concurrency.
+app.post('/api/booking-notes', async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean).slice(0, 80) : [];
+  if (!ids.length) return res.json({});
+  const apiKey = SERVER_API_KEY || (pool ? await getStoredApiKey() : null);
+  if (!apiKey) return res.status(400).json({ error: 'No Hosthub API key configured.' });
+  const out = {};
+  let i = 0;
+  async function worker() {
+    while (i < ids.length) {
+      const id = ids[i++];
+      try {
+        const r = await fetch(`${BASE}/calendar-events/${encodeURIComponent(id)}/notes`, {
+          headers: { Authorization: apiKey },
+        });
+        if (!r.ok) { out[id] = []; continue; }
+        const j = await r.json().catch(() => null);
+        const list = Array.isArray(j?.data) ? j.data : (Array.isArray(j) ? j : []);
+        out[id] = list
+          .filter(n => n && n.status !== 'deleted' && n.content)
+          .map(n => ({
+            content: String(n.content),
+            created: n.created || null,
+            by: (n.created_by && (n.created_by.name || n.created_by.first_name)) || '',
+          }));
+      } catch (e) { out[id] = []; }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(5, ids.length) }, worker));
+  res.json(out);
+});
+
 // GET /api/history — rolling per-property daily snapshots for trend detection
 app.get('/api/history', async (req, res) => {
   if (!pool) return res.json([]);

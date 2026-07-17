@@ -5617,6 +5617,8 @@ function _opsAutoRows(date) {
     rows.push({
       aptId: bk.aptId||'',
       aptName: bk.aptName||'',
+      bkId: bk.id||'',
+      nextBkId: nxt ? (nxt.id||'') : '',
       checkoutGuest: bk.guestName||'',
       alreadyCleaned: false, cleanedDate: null,
       lateCheckout: false,
@@ -5640,7 +5642,7 @@ function _opsAutoRows(date) {
   checkinOnly.forEach(bk => {
     rows.push({
       aptId: bk.aptId||'', aptName: bk.aptName||'',
-      checkoutGuest: '', isCheckinOnly: true,
+      checkoutGuest: '', isCheckinOnly: true, bkId: '', nextBkId: bk.id||'',
       alreadyCleaned: false, cleanedDate: null, lateCheckout: false, checkoutRequested: false,
       checkinSameDay: 'checkin_only',
       nextNights: bk.nights||null, nextGuest: bk.guestName||'',
@@ -5648,6 +5650,47 @@ function _opsAutoRows(date) {
     });
   });
   return rows;
+}
+
+// ── Hosthub reservation notes (Daily Ops column) ────────────────────────────
+// Fetched in ONE batched request per day view (the board shows ~10–20 rows, so
+// this stays light). Cached per booking id for the session.
+let _opsNotesCache = {};   // bkId → array of {content,created,by} | null while loading
+function _opsNoteHtml(r) {
+  const get = (id) => id ? _opsNotesCache[id] : undefined;
+  const co = get(r.bkId), ci = get(r.nextBkId);
+  if ((r.bkId && co === null) || (r.nextBkId && ci === null))
+    return '<span style="color:#9CA3AF;font-size:11px">…</span>';
+  const parts = [];
+  (co || []).forEach(n => parts.push({ tag: 'CO', t: n.content }));
+  (ci || []).forEach(n => parts.push({ tag: 'CI', t: n.content }));
+  if (!parts.length) return '<span style="color:#D1D5DB;font-size:11px">—</span>';
+  const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  return parts.map(p =>
+    '<div style="font-size:11px;line-height:1.35;margin:1px 0"><span style="font-weight:700;color:' +
+    (p.tag === 'CO' ? '#92400E' : '#1E40AF') + '" title="' + (p.tag === 'CO' ? 'note on the checkout reservation' : 'note on the incoming reservation') + '">' +
+    p.tag + '</span> ' + esc(p.t) + '</div>').join('');
+}
+async function _opsFetchNotes() {
+  const ids = [];
+  (_opsRows || []).forEach(r => {
+    if (r.bkId && _opsNotesCache[r.bkId] === undefined) ids.push(r.bkId);
+    if (r.nextBkId && _opsNotesCache[r.nextBkId] === undefined) ids.push(r.nextBkId);
+  });
+  if (!ids.length) return;
+  ids.forEach(id => { _opsNotesCache[id] = null; });          // mark in-flight
+  try {
+    const res = await fetch('/api/booking-notes', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    const data = res.ok ? await res.json() : {};
+    ids.forEach(id => { _opsNotesCache[id] = Array.isArray(data[id]) ? data[id] : []; });
+  } catch (e) { ids.forEach(id => { _opsNotesCache[id] = []; }); }
+  (_opsRows || []).forEach((r, i) => {
+    const el = document.getElementById('ops-note-' + i);
+    if (el) el.innerHTML = _opsNoteHtml(r);
+  });
 }
 
 // Metro-proximity ordering for Daily Ops rows (same order as Performance tab).
@@ -5760,6 +5803,7 @@ function _opsBuildRow(row, i) {
         placeholder="—"
         style="width:80px;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;text-align:center">
     </td>
+    <td id="ops-note-${i}" style="padding:4px 8px;border:1px solid #ddd;vertical-align:top;max-width:220px">${_opsNoteHtml(row)}</td>
     <td style="padding:4px 4px;border:1px solid #ddd">
       <input type="text" value="${row.comments||''}" data-field="comments"
         oninput="opsSetRow(${i},'comments',this.value);_opsAutoSave()"
@@ -6030,7 +6074,7 @@ function renderOps() {
 
   const rowsHtml = _opsRows.length
     ? _opsRows.map(function(r,i){ return _opsBuildRow(r,i); }).join('')
-    : '<tr><td colspan="9" style="text-align:center;padding:20px;color:#9CA3AF;font-style:italic">Δεν υπάρχουν checkout για ' + _opsFmtDate(_opsDate) + '</td></tr>';
+    : '<tr><td colspan="10" style="text-align:center;padding:20px;color:#9CA3AF;font-style:italic">Δεν υπάρχουν checkout για ' + _opsFmtDate(_opsDate) + '</td></tr>';
 
   el.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:0;height:100%">
@@ -6100,6 +6144,7 @@ function renderOps() {
               <th style="padding:7px 8px;border:1px solid #374151;text-align:center;min-width:150px">Check in ίδιας</th>
               <th style="padding:7px 6px;border:1px solid #374151;text-align:center;width:48px">👥</th>
               <th style="padding:7px 8px;border:1px solid #374151;text-align:center;min-width:90px">⏰ Άφιξη</th>
+              <th style="padding:7px 8px;border:1px solid #374151;text-align:left;min-width:140px" title="Notes on the reservations, pulled live from Hosthub (CO = checkout booking, CI = incoming)">📝 Hosthub</th>
               <th style="padding:7px 8px;border:1px solid #374151;text-align:left;min-width:120px">Σχόλια</th>
               <th style="padding:7px 4px;border:1px solid #374151;width:28px"></th>
             </tr>
@@ -6166,6 +6211,9 @@ function renderOps() {
         </div>
       </div>
     </div>`;
+
+  // Pull Hosthub reservation notes for the visible rows (batched, cached).
+  setTimeout(_opsFetchNotes, 50);
 }
 
 
