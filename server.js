@@ -315,6 +315,7 @@ app.post('/api/rental-info/:id', async (req, res) => {
       amenities: (body.amenities && typeof body.amenities === 'object') ? body.amenities : {},
       faqs: Array.isArray(body.faqs) ? body.faqs.filter(f => f && (f.q || f.a)).slice(0, 200) : [],
       houseRules: (body.houseRules && typeof body.houseRules === 'object') ? body.houseRules : {},
+      compliance: (body.compliance && typeof body.compliance === 'object') ? body.compliance : {},
     };
     await pool.query(
       `INSERT INTO app_data (key, data, updated_at) VALUES ($1, $2, NOW())

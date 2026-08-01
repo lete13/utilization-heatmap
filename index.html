@@ -6838,7 +6838,52 @@ loadFromDb()
     ['minimum_length_of_stay','Min stay (nights)'],
   ];
   let _selRentalId = null;
-  let _cur = { amenities: {}, faqs: [], houseRules: {} };
+
+  // ── Compliance board (Law 5170/2025 short-term-rental requirements) ─────────
+  const COMPLIANCE_ITEMS = [
+    { id:'liability_insurance', label:'Liability insurance' },
+    { id:'disinfection',        label:'Disinfection / rodent control' },
+    { id:'smoke_detector',      label:'Fire alarm / smoke detector' },
+    { id:'fire_extinguisher',   label:'Fire extinguisher' },
+    { id:'first_aid',           label:'First aid kit' },
+    { id:'emergency_phones',    label:'Emergency phones', optional:true },
+    { id:'electrical_cert',     label:'Electrical safety certificate' },
+    { id:'exit_signage',        label:'Emergency exit signage & lighting' },
+  ];
+  const COMPLIANCE_SOON_DAYS = 30;   // amber window before the due date
+
+  // Compress an image file to ~Viber/WhatsApp quality: max ~1280px, JPEG ~0.7.
+  function _compressImage(file, cb) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1280;
+        let { width: w, height: h } = img;
+        if (w > MAX || h > MAX) { const s = MAX / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+        const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        cb(cv.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = () => cb(null);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => cb(null);
+    reader.readAsDataURL(file);
+  }
+
+  // Status from a due date: overdue (red) / soon (amber) / valid (green) / none.
+  function _complianceStatus(due) {
+    if (!due) return { level: 'none', label: 'no date' };
+    const d = new Date(due + 'T00:00:00'); if (isNaN(d)) return { level: 'none', label: 'no date' };
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const days = Math.round((d - today) / 86400000);
+    if (days < 0) return { level: 'red', label: `overdue ${-days}d`, days };
+    if (days <= COMPLIANCE_SOON_DAYS) return { level: 'amber', label: `in ${days}d`, days };
+    return { level: 'green', label: `valid · ${days}d`, days };
+  }
+
+  let _cur = { amenities: {}, faqs: [], houseRules: {}, compliance: {} };
   let _loading = false, _dirty = false;
 
   function _esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
@@ -6861,6 +6906,7 @@ loadFromDb()
         amenities: data.amenities || {},
         faqs: Array.isArray(data.faqs) ? data.faqs : [],
         houseRules: data.houseRules || {},
+        compliance: data.compliance || {},
       };
       // auto-seed any missing house-rule fields from Hosthub
       const apt = (S.apts || []).find(a => a.id === rentalId) || {};
@@ -6869,7 +6915,7 @@ loadFromDb()
       // if a minimum stay came through (from Hosthub or saved data), turn the toggle on
       if (_cur.houseRules.min_stay_on == null) _cur.houseRules.min_stay_on = !!(_cur.houseRules.minimum_length_of_stay);
     } catch (e) {
-      _cur = { amenities: {}, faqs: [], houseRules: {} };
+      _cur = { amenities: {}, faqs: [], houseRules: {}, compliance: {} };
     }
     _loading = false; _dirty = false; renderPropInfo();
   }
@@ -6904,6 +6950,27 @@ loadFromDb()
     _cur.houseRules.min_stay_on = !_cur.houseRules.min_stay_on;
     if (!_cur.houseRules.min_stay_on) _cur.houseRules.minimum_length_of_stay = '';
     _dirty = true; renderPropInfo();
+  };
+  // Compliance: photo upload (object|receipt), due date, photo removal.
+  window.pinfoCompPhoto = function (itemId, slot, input) {
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    _compressImage(file, (dataUrl) => {
+      if (!dataUrl) { if (typeof toast === 'function') toast('Could not read image.', 'err'); return; }
+      _cur.compliance[itemId] = _cur.compliance[itemId] || {};
+      _cur.compliance[itemId][slot] = dataUrl;
+      _dirty = true; renderPropInfo();
+    });
+  };
+  window.pinfoCompDate = function (itemId, val) {
+    _cur.compliance[itemId] = _cur.compliance[itemId] || {};
+    _cur.compliance[itemId].due = val; _dirty = true; _markDirty();
+    // update just the status pill live
+    const el = document.getElementById('compstatus-' + itemId);
+    if (el) { const st = _complianceStatus(val); el.outerHTML = _compStatusPill(itemId, st); }
+  };
+  window.pinfoCompPhotoDel = function (itemId, slot) {
+    if (_cur.compliance[itemId]) { delete _cur.compliance[itemId][slot]; _dirty = true; renderPropInfo(); }
   };
   // Copy an amenity as "Label: note" (or just the label) ready to paste in chat.
   window.pinfoCopy = function (aid, btn) {
@@ -6947,6 +7014,59 @@ loadFromDb()
     if (it.type === 'select') return fill ? `${it.selPrefix || it.label} ${fill}`.trim() : it.label;
     if (it.type === 'prefix' && it.prefix) return `${it.prefix} ${fill}`.trim();
     return fill || it.label;                                   // free-form text
+  }
+
+  function _compStatusPill(itemId, st) {
+    const col = st.level === 'red' ? { bg:'#fdecea', bd:'#f5c6cb', fg:'#c0392b' }
+              : st.level === 'amber' ? { bg:'#fff5e6', bd:'#ffe0b2', fg:'#d68910' }
+              : st.level === 'green' ? { bg:'#eafaf1', bd:'#c9ecd8', fg:'#1a7a4a' }
+              : { bg:'#f2f2f5', bd:'#e0e0e6', fg:'#9CA3AF' };
+    return `<span id="compstatus-${itemId}" style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:9px;background:${col.bg};border:1px solid ${col.bd};color:${col.fg};white-space:nowrap">${st.label}</span>`;
+  }
+  function _compPhotoSlot(itemId, slot, label) {
+    const rec = _cur.compliance[itemId] || {};
+    const img = rec[slot];
+    if (img) {
+      return `<div style="position:relative;display:inline-block">
+        <img src="${img}" style="width:54px;height:54px;object-fit:cover;border-radius:6px;border:1px solid #e0e0e6;cursor:pointer" title="${label} — click to view" onclick="var w=window.open('');w.document.write('<img src=&quot;${img}&quot; style=&quot;max-width:100%&quot;>')">
+        <button onclick="pinfoCompPhotoDel('${itemId}','${slot}')" title="Remove" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:#c0392b;color:#fff;font-size:11px;cursor:pointer;line-height:1;padding:0">×</button>
+      </div>`;
+    }
+    return `<label style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;width:54px;height:54px;border:1px dashed #c8ccd8;border-radius:6px;cursor:pointer;font-size:9px;color:#9CA3AF;text-align:center;gap:1px">
+      <span style="font-size:15px;line-height:1">＋</span>${label}
+      <input type="file" accept="image/*" onchange="pinfoCompPhoto('${itemId}','${slot}',this)" style="display:none">
+    </label>`;
+  }
+  function _complianceBoardHtml() {
+    const rows = COMPLIANCE_ITEMS.map(it => {
+      const rec = _cur.compliance[it.id] || {};
+      const st = _complianceStatus(rec.due);
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f3">
+        <div style="flex:1;min-width:150px">
+          <div style="font-size:13px;font-weight:600;color:#1a1a2e">${_esc(it.label)}${it.optional ? ' <span style="font-size:10px;color:#9CA3AF;font-weight:400">(optional)</span>' : ''}</div>
+          <div style="margin-top:3px">${_compStatusPill(it.id, st)}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          ${_compPhotoSlot(it.id, 'objectPhoto', 'object')}
+          ${_compPhotoSlot(it.id, 'receiptPhoto', 'receipt')}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:9px;color:#9CA3AF">due date</span>
+          <input type="date" value="${_esc(rec.due)}" onchange="pinfoCompDate('${it.id}',this.value)" style="font-size:12px;padding:4px 6px;border:1px solid #e0e0e6;border-radius:6px">
+        </div>
+      </div>`;
+    }).join('');
+    const cnt = (lvl) => COMPLIANCE_ITEMS.filter(it => _complianceStatus((_cur.compliance[it.id]||{}).due).level === lvl).length;
+    const overdue = cnt('red'), soon = cnt('amber');
+    return `<div style="margin-top:26px;border-top:2px solid var(--bdr);padding-top:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <div style="font-size:15px;font-weight:700;color:#1a1a2e">⚖️ Compliance (Law 5170/2025)</div>
+        ${overdue ? `<span style="font-size:11px;color:#c0392b;font-weight:600">${overdue} overdue</span>` : ''}
+        ${soon ? `<span style="font-size:11px;color:#d68910;font-weight:600">${soon} due soon</span>` : ''}
+      </div>
+      <div style="font-size:11px;color:var(--tx3);margin-bottom:8px">Photo of the physical item + its receipt, and the renewal/expiry due date. Photos are compressed on upload.</div>
+      ${rows}
+    </div>`;
   }
 
   function _amenityRowHtml(aid, label) {
@@ -7060,7 +7180,8 @@ loadFromDb()
             </div>
             ${faqs || '<div style="color:var(--tx3);font-size:12px;padding:8px 0">No FAQs yet — add the questions guests ask most.</div>'}
           </div>
-        </div>`;
+        </div>
+        ${_complianceBoardHtml()}`;
     }
 
     panel.innerHTML = `<div style="padding:18px 22px;max-width:1200px;margin:0 auto">
