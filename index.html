@@ -131,6 +131,7 @@
     <button class="nav-btn" onclick="showTab('rev',this)" id="nav-rev">💰 Elysian Revenue</button>
     <button class="nav-btn" onclick="showTab('ops',this)" id="nav-ops">🗓 Daily Ops</button>
     <button class="nav-btn" onclick="showTab('perf',this)" id="nav-perf">📊 Performance</button>
+    <button class="nav-btn" onclick="showTab('pinfo',this)" id="nav-pinfo">🏷 Property Info</button>
   </nav>
   <div style="margin-left:auto;display:flex;align-items:center;gap:14px">
     <button class="btn sm" onclick="clearAll()" style="border-color:rgba(255,255,255,.2);color:rgba(255,255,255,.6);background:transparent"><i class="ti ti-trash"></i> Clear data</button>
@@ -628,6 +629,7 @@
 <!-- ELYSIAN REVENUE TAB -->
 <div id="tab-rev" class="tab-panel" style="background:var(--bg)"></div>
 <div id="tab-perf" class="tab-panel" style="background:var(--bg)"></div>
+<div id="tab-pinfo" class="tab-panel" style="background:var(--bg)"></div>
 
 
  -->
@@ -2623,6 +2625,7 @@ function showTab(name,btn){
     else if(name==='imports'){renderHealth();checkServerStatus();}
     else if(name==='rev'){renderRevenue();}
     else if(name==='ops'){if(!_opsDate)_opsDate=_opsTodayStr();renderOps();}
+    else if(name==='pinfo'){renderPropInfo();}
   });
 }
 
@@ -5619,6 +5622,8 @@ function _opsAutoRows(date) {
       aptName: bk.aptName||'',
       bkId: bk.id||'',
       nextBkId: nxt ? (nxt.id||'') : '',
+      hhNotes: bk.hhNotes||[],
+      nextHhNotes: nxt ? (nxt.hhNotes||[]) : [],
       checkoutGuest: bk.guestName||'',
       alreadyCleaned: false, cleanedDate: null,
       lateCheckout: false,
@@ -5643,6 +5648,7 @@ function _opsAutoRows(date) {
     rows.push({
       aptId: bk.aptId||'', aptName: bk.aptName||'',
       checkoutGuest: '', isCheckinOnly: true, bkId: '', nextBkId: bk.id||'',
+      hhNotes: [], nextHhNotes: bk.hhNotes||[],
       alreadyCleaned: false, cleanedDate: null, lateCheckout: false, checkoutRequested: false,
       checkinSameDay: 'checkin_only',
       nextNights: bk.nights||null, nextGuest: bk.guestName||'',
@@ -5659,17 +5665,35 @@ let _opsNotesCache = {};   // bkId → array of {content,created,by} | null whil
 function _opsNoteHtml(r) {
   const get = (id) => id ? _opsNotesCache[id] : undefined;
   const co = get(r.bkId), ci = get(r.nextBkId);
-  if ((r.bkId && co === null) || (r.nextBkId && ci === null))
-    return '<span style="color:#9CA3AF;font-size:11px">…</span>';
-  const parts = [];
-  (co || []).forEach(n => parts.push({ tag: 'CO', t: n.content }));
-  (ci || []).forEach(n => parts.push({ tag: 'CI', t: n.content }));
-  if (!parts.length) return '<span style="color:#D1D5DB;font-size:11px">—</span>';
+  const loading = (r.bkId && co === null) || (r.nextBkId && ci === null);
   const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
-  return parts.map(p =>
-    '<div style="font-size:11px;line-height:1.35;margin:1px 0"><span style="font-weight:700;color:' +
-    (p.tag === 'CO' ? '#92400E' : '#1E40AF') + '" title="' + (p.tag === 'CO' ? 'note on the checkout reservation' : 'note on the incoming reservation') + '">' +
-    p.tag + '</span> ' + esc(p.t) + '</div>').join('');
+  const parts = [];
+  // Flags Hosthub set directly on the reservation (notes / guest & room remarks
+  // / hold reason / any action-urgent-style field) — these ship with the sync.
+  (r.hhNotes || []).forEach(n => parts.push({ tag: 'CO', label: n.label, t: n.text }));
+  (r.nextHhNotes || []).forEach(n => parts.push({ tag: 'CI', label: n.label, t: n.text }));
+  // Notes added as separate note objects (fetched from /calendar-events/:id/notes)
+  (co || []).forEach(n => parts.push({ tag: 'CO', label: 'Note', t: n.content }));
+  (ci || []).forEach(n => parts.push({ tag: 'CI', label: 'Note', t: n.content }));
+  // de-duplicate identical text (a field and a note object can repeat)
+  const seen = new Set();
+  const uniq = parts.filter(p => {
+    const k = p.tag + '|' + String(p.t).trim().toLowerCase();
+    if (seen.has(k)) return false; seen.add(k); return true;
+  });
+  if (!uniq.length) return loading
+    ? '<span style="color:#9CA3AF;font-size:11px">…</span>'
+    : '<span style="color:#D1D5DB;font-size:11px">—</span>';
+  const urgent = (p) => /urgent|asap|immediate|επεί|άμεσ/i.test(p.label + ' ' + p.t);
+  const body = uniq.map(p => {
+    const u = urgent(p);
+    return '<div style="font-size:11px;line-height:1.35;margin:1px 0' + (u ? ';font-weight:600' : '') + '">' +
+      '<span style="font-weight:700;color:' + (p.tag === 'CO' ? '#92400E' : '#1E40AF') + '" title="' +
+      (p.tag === 'CO' ? 'on the checkout reservation' : 'on the incoming reservation') + '">' + p.tag + '</span> ' +
+      (u ? '<span title="urgent">🔴 </span>' : '') +
+      '<span style="color:#6B7280">' + esc(p.label) + ':</span> ' + esc(p.t) + '</div>';
+  }).join('');
+  return body + (loading ? '<div style="color:#9CA3AF;font-size:10px">…</div>' : '');
 }
 async function _opsFetchNotes() {
   const ids = [];
@@ -6771,6 +6795,285 @@ loadFromDb()
   .then(() => { _showLoadingSpinner(false); startDbPoll(); })
   .catch(() => { _showLoadingSpinner(false); });
 
+
+/* ===== PROPERTY INFO TAB (amenities checklist + FAQs, per rental) ===== */
+(function () {
+  // Master amenities checklist — grouped, based on Booking.com's facility set.
+  // Each item: id + label. Rendered as on/off + optional note per rental.
+  // Each item: { id, label, prefix, type }.
+  //  type 'prefix'   → sentence-start label (outside the box) + fill-in
+  //  type 'text'     → free-form fill-in, no prefix
+  //  type 'check'    → checkbox only, no fill-in
+  //  type 'select'   → dropdown (opts)
+  const AMENITY_GROUPS = [
+    ['Essentials', [
+      { id:'wifi_free', label:'Free WiFi', prefix:'The WiFi network name and password are:', type:'prefix' },
+      { id:'aircon', label:'Air conditioning', type:'text' },
+      { id:'iron', label:'Iron', prefix:'The iron is located:', type:'prefix' },
+      { id:'hairdryer', label:'Hairdryer', prefix:'The hairdryer is located:', type:'prefix' },
+      { id:'pet_friendly', label:'Pet friendly', type:'check' },
+    ]],
+    ['Bedroom & laundry', [
+      { id:'linen', label:'Linen', prefix:'An additional linen set is located:', type:'prefix' },
+      { id:'clothes_rack', label:'Clothes rack', type:'check' },
+      { id:'drying_rack', label:'Drying rack', prefix:'The drying rack is located:', type:'prefix' },
+      { id:'washing_machine', label:'Washing machine', type:'check' },
+      { id:'iron_board', label:'Iron board', prefix:'The iron board is located:', type:'prefix' },
+      { id:'vacuum', label:'Vacuum cleaner', prefix:'The vacuum cleaner is located:', type:'prefix' },
+      { id:'mop', label:'Mop & bucket', prefix:'The mop and bucket are located:', type:'prefix' },
+      { id:'sofa_bed', label:'Sofa bed', type:'select', opts:['1','2'], selPrefix:'The sofa bed sleeps' },
+    ]],
+    ['Building & access', [
+      { id:'elevator', label:'Elevator', type:'text' },
+      { id:'luggage_storage', label:'Luggage storage', type:'check' },
+      { id:'key_lockbox', label:'Key access / lockbox', type:'text' },
+      { id:'backup_keys', label:'Backup keys', type:'text' },
+      { id:'doorbell', label:'Doorbell', prefix:'The apartment bell is labeled:', type:'prefix' },
+    ]],
+  ];
+
+  // House-rule fields auto-seeded from Hosthub rental data when available.
+  const HOUSE_RULE_FIELDS = [
+    ['maximum_guests','Max guests'],
+    ['minimum_length_of_stay','Min stay (nights)'],
+  ];
+  let _selRentalId = null;
+  let _cur = { amenities: {}, faqs: [], houseRules: {} };
+  let _loading = false, _dirty = false;
+
+  function _esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+
+  // seed house rules from the Hosthub rental object (if fields present)
+  function _seedHouseRules(apt) {
+    const hr = {};
+    HOUSE_RULE_FIELDS.forEach(([k]) => {
+      if (apt && apt[k] != null && apt[k] !== '') hr[k] = apt[k];
+    });
+    return hr;
+  }
+
+  async function _load(rentalId) {
+    _loading = true; renderPropInfo();
+    try {
+      const r = await fetch('/api/rental-info/' + encodeURIComponent(rentalId));
+      const data = r.ok ? await r.json() : {};
+      _cur = {
+        amenities: data.amenities || {},
+        faqs: Array.isArray(data.faqs) ? data.faqs : [],
+        houseRules: data.houseRules || {},
+      };
+      // auto-seed any missing house-rule fields from Hosthub
+      const apt = (S.apts || []).find(a => a.id === rentalId) || {};
+      const seed = _seedHouseRules(apt);
+      Object.keys(seed).forEach(k => { if (_cur.houseRules[k] == null || _cur.houseRules[k] === '') _cur.houseRules[k] = seed[k]; });
+      // if a minimum stay came through (from Hosthub or saved data), turn the toggle on
+      if (_cur.houseRules.min_stay_on == null) _cur.houseRules.min_stay_on = !!(_cur.houseRules.minimum_length_of_stay);
+    } catch (e) {
+      _cur = { amenities: {}, faqs: [], houseRules: {} };
+    }
+    _loading = false; _dirty = false; renderPropInfo();
+  }
+
+  async function _save() {
+    if (!_selRentalId) return;
+    try {
+      const r = await fetch('/api/rental-info/' + encodeURIComponent(_selRentalId), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(_cur),
+      });
+      if (r.ok) { _dirty = false; if (typeof toast === 'function') toast('Saved.', 'ok'); renderPropInfo(); }
+      else if (typeof toast === 'function') toast('Save failed.', 'err');
+    } catch (e) { if (typeof toast === 'function') toast('Save failed (offline?).', 'err'); }
+  }
+
+  // expose handlers
+  window.pinfoSelectRental = function (id) { _selRentalId = id || null; if (id) _load(id); else renderPropInfo(); };
+  window.pinfoToggle = function (aid) {
+    const a = _cur.amenities[aid] || { on: false, note: '' };
+    a.on = !a.on; _cur.amenities[aid] = a; _dirty = true;
+    const row = document.getElementById('amrow-' + aid);
+    if (row) row.outerHTML = _amenityRowHtml(aid, _amLabel(aid));
+    _markDirty();
+  };
+  window.pinfoNote = function (aid, val) {
+    const a = _cur.amenities[aid] || { on: false, note: '' };
+    a.note = val; _cur.amenities[aid] = a; _dirty = true; _markDirty();
+  };
+  window.pinfoRule = function (k, val) { _cur.houseRules[k] = val; _dirty = true; _markDirty(); };
+  window.pinfoMinStayToggle = function () {
+    _cur.houseRules.min_stay_on = !_cur.houseRules.min_stay_on;
+    if (!_cur.houseRules.min_stay_on) _cur.houseRules.minimum_length_of_stay = '';
+    _dirty = true; renderPropInfo();
+  };
+  // Copy an amenity as "Label: note" (or just the label) ready to paste in chat.
+  window.pinfoCopy = function (aid, btn) {
+    const text = _amSentence(aid);
+    const done = () => { if (btn) { const o = btn.textContent; btn.textContent = '✓'; setTimeout(() => { btn.textContent = o; }, 1000); } };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+    } else fallbackCopy(text, done);
+  };
+  function fallbackCopy(text, cb) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+      document.body.removeChild(ta); cb && cb();
+    } catch (e) { if (typeof toast === 'function') toast('Copy failed.', 'err'); }
+  }
+  window.pinfoAddFaq = function () { _cur.faqs.push({ q: '', a: '' }); _dirty = true; renderPropInfo(); };
+  window.pinfoFaq = function (i, field, val) { if (_cur.faqs[i]) { _cur.faqs[i][field] = val; _dirty = true; _markDirty(); } };
+  window.pinfoDelFaq = function (i) { _cur.faqs.splice(i, 1); _dirty = true; renderPropInfo(); };
+  window.pinfoSave = _save;
+
+  function _markDirty() {
+    const b = document.getElementById('pinfo-save');
+    if (b) { b.disabled = false; b.textContent = '💾 Save changes'; b.style.opacity = '1'; }
+  }
+
+  function _amItem(aid) {
+    for (const [, items] of AMENITY_GROUPS) { for (const it of items) if (it.id === aid) return it; }
+    return null;
+  }
+  function _amLabel(aid) { const it = _amItem(aid); return it ? it.label : aid; }
+  function _amPrefix(aid) { const it = _amItem(aid); return (it && it.prefix) || ''; }
+  // Full answer sentence for the copy button, per type.
+  function _amSentence(aid) {
+    const it = _amItem(aid);
+    const a = _cur.amenities[aid] || { note: '' };
+    if (!it) return (a.note || '').trim();
+    const fill = (a.note || '').trim();
+    if (it.type === 'check') return it.label;                 // no fill-in
+    if (it.type === 'select') return fill ? `${it.selPrefix || it.label} ${fill}`.trim() : it.label;
+    if (it.type === 'prefix' && it.prefix) return `${it.prefix} ${fill}`.trim();
+    return fill || it.label;                                   // free-form text
+  }
+
+  function _amenityRowHtml(aid, label) {
+    const it = _amItem(aid) || { type: 'text', label };
+    const a = _cur.amenities[aid] || { on: false, note: '' };
+    const copyBtn = `<button onclick="pinfoCopy('${aid}',this)" title="Copy to paste in chat" style="background:#f0f0f3;border:1px solid #e0e0e6;border-radius:6px;cursor:pointer;font-size:12px;padding:4px 8px;color:#374151;min-width:30px">⧉</button>`;
+    const inp = (ph) => `<input type="text" value="${_esc(a.note)}" oninput="pinfoNote('${aid}',this.value)" placeholder="${ph}" style="flex:1;font-size:12px;padding:4px 8px;border:1px solid #e0e0e6;border-radius:6px;min-width:80px">`;
+
+    let field = '';
+    if (!a.on) {
+      field = `<input type="text" disabled style="flex:1;font-size:12px;padding:4px 8px;border:1px solid #e0e0e6;border-radius:6px;background:#f7f7f9">`;
+    } else if (it.type === 'check') {
+      field = `<span style="flex:1;font-size:12px;color:#1a7a4a">✓ available</span>`;
+    } else if (it.type === 'select') {
+      const opts = (it.opts || []).map(o => `<option value="${_esc(o)}" ${a.note === o ? 'selected' : ''}>${_esc(o)}</option>`).join('');
+      field = `<span style="font-size:12px;color:#6B7280;white-space:nowrap">${_esc(it.selPrefix || '')}</span>
+        <select onchange="pinfoNote('${aid}',this.value)" style="font-size:12px;padding:4px 8px;border:1px solid #e0e0e6;border-radius:6px"><option value="">—</option>${opts}</select>
+        <span style="flex:1"></span>${copyBtn}`;
+    } else if (it.type === 'prefix') {
+      field = `<span style="font-size:12px;color:#6B7280;white-space:nowrap">${_esc(it.prefix)}</span>${inp('fill in…')}${copyBtn}`;
+    } else { // free-form text
+      field = `${inp('add info (optional)…')}${copyBtn}`;
+    }
+
+    return `<div id="amrow-${aid}" style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f3">
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;min-width:170px;font-size:13px">
+        <input type="checkbox" ${a.on ? 'checked' : ''} onclick="pinfoToggle('${aid}')" style="width:15px;height:15px;cursor:pointer">
+        <span style="${a.on ? 'font-weight:600;color:#1a1a2e' : 'color:#6B7280'}">${_esc(label)}</span>
+      </label>
+      ${field}
+    </div>`;
+  }
+
+  function renderPropInfo() {
+    const panel = document.getElementById('tab-pinfo');
+    if (!panel) return;
+    const apts = (S.apts || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    const picker = `<select onchange="pinfoSelectRental(this.value)" style="font-size:14px;padding:8px 12px;border:1px solid var(--bdr);border-radius:8px;min-width:280px;background:var(--card);color:var(--tx)">
+      <option value="">— Select a property —</option>
+      ${apts.map(a => `<option value="${_esc(a.id)}" ${a.id === _selRentalId ? 'selected' : ''}>${_esc(a.name)}</option>`).join('')}
+    </select>`;
+
+    let body = '';
+    if (!_selRentalId) {
+      body = `<div style="padding:40px;text-align:center;color:var(--tx3)">Select a property above to view and edit its amenities and FAQs.</div>`;
+    } else if (_loading) {
+      body = `<div style="padding:40px;text-align:center;color:var(--tx3)">Loading…</div>`;
+    } else {
+      const countOn = Object.values(_cur.amenities).filter(a => a && a.on).length;
+      // house rules
+      // House rules: Max guests dropdown (1–15); Min stay checkbox that reveals
+      // a nights box when active. Values stored under houseRules.
+      const maxGuestsSel = (() => {
+        const cur = _cur.houseRules.maximum_guests || '';
+        const opts = Array.from({ length: 15 }, (_, i) => i + 1)
+          .map(n => `<option value="${n}" ${String(cur) === String(n) ? 'selected' : ''}>${n}</option>`).join('');
+        return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+          <span style="min-width:150px;font-size:12px;color:#6B7280">Max guests</span>
+          <select onchange="pinfoRule('maximum_guests',this.value)" style="font-size:12px;padding:4px 8px;border:1px solid #e0e0e6;border-radius:6px">
+            <option value="">—</option>${opts}
+          </select>
+        </div>`;
+      })();
+      const minStayOn = !!_cur.houseRules.min_stay_on;
+      const minStayRow = `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+        <label style="min-width:150px;font-size:12px;color:#6B7280;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" ${minStayOn ? 'checked' : ''} onclick="pinfoMinStayToggle()" style="width:14px;height:14px;cursor:pointer"> Minimum stay
+        </label>
+        ${minStayOn ? `<input type="number" min="1" value="${_esc(_cur.houseRules.minimum_length_of_stay)}" oninput="pinfoRule('minimum_length_of_stay',this.value)" placeholder="nights" style="width:90px;font-size:12px;padding:4px 8px;border:1px solid #e0e0e6;border-radius:6px"> <span style="font-size:12px;color:#6B7280">nights</span>` : `<span style="font-size:12px;color:#9CA3AF">no minimum</span>`}
+      </div>`;
+      const rules = maxGuestsSel + minStayRow;
+      // amenities grouped
+      const groups = AMENITY_GROUPS.map(([title, items]) => {
+        const onInGroup = items.filter(it => _cur.amenities[it.id] && _cur.amenities[it.id].on).length;
+        return `<div style="margin-bottom:14px">
+          <div style="font-size:12px;font-weight:700;color:#C9A84C;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">${_esc(title)} <span style="color:#9CA3AF;font-weight:400">· ${onInGroup}/${items.length}</span></div>
+          ${items.map(it => _amenityRowHtml(it.id, it.label)).join('')}
+        </div>`;
+      }).join('');
+      // faqs
+      const faqs = _cur.faqs.map((f, i) =>
+        `<div style="border:1px solid #e8e8ee;border-radius:8px;padding:10px;margin-bottom:8px;background:#fafafb">
+          <div style="display:flex;gap:8px;align-items:flex-start">
+            <div style="flex:1">
+              <input type="text" value="${_esc(f.q)}" oninput="pinfoFaq(${i},'q',this.value)" placeholder="Question…"
+                style="width:100%;font-size:13px;font-weight:600;padding:5px 8px;border:1px solid #e0e0e6;border-radius:6px;margin-bottom:5px">
+              <textarea oninput="pinfoFaq(${i},'a',this.value)" placeholder="Answer…" rows="2"
+                style="width:100%;font-size:12px;padding:5px 8px;border:1px solid #e0e0e6;border-radius:6px;resize:vertical">${_esc(f.a)}</textarea>
+            </div>
+            <button onclick="pinfoDelFaq(${i})" title="Delete" style="background:none;border:none;color:#c0392b;cursor:pointer;font-size:16px;padding:2px 4px">×</button>
+          </div>
+        </div>`).join('');
+
+      body = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">
+          <div style="font-size:13px;color:var(--tx2)"><strong style="color:#1a7a4a">${countOn}</strong> amenities enabled</div>
+          <button id="pinfo-save" onclick="pinfoSave()" ${_dirty ? '' : 'disabled'} class="btn primary" style="${_dirty ? '' : 'opacity:.5'}">💾 ${_dirty ? 'Save changes' : 'Saved'}</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:#1a1a2e;margin-bottom:10px">Amenities</div>
+            ${groups}
+          </div>
+          <div>
+            <div style="font-size:14px;font-weight:700;color:#1a1a2e;margin-bottom:10px">House rules <span style="font-size:11px;font-weight:400;color:#9CA3AF">(auto-seeded from Hosthub where available)</span></div>
+            <div style="margin-bottom:22px">${rules}</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div style="font-size:14px;font-weight:700;color:#1a1a2e">FAQs</div>
+              <button onclick="pinfoAddFaq()" class="btn sm">+ Add FAQ</button>
+            </div>
+            ${faqs || '<div style="color:var(--tx3);font-size:12px;padding:8px 0">No FAQs yet — add the questions guests ask most.</div>'}
+          </div>
+        </div>`;
+    }
+
+    panel.innerHTML = `<div style="padding:18px 22px;max-width:1200px;margin:0 auto">
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:6px">
+        <h2 style="margin:0;font-size:20px;color:var(--tx)">🏷 Property Info</h2>
+        ${picker}
+      </div>
+      <div style="font-size:12px;color:var(--tx3);margin-bottom:6px">Amenities checklist &amp; FAQs — stored per property. ${_dirty ? '<span style="color:#d68910">● unsaved changes</span>' : ''}</div>
+      ${body}
+    </div>`;
+  }
+  window.renderPropInfo = renderPropInfo;
+})();
 
 /* ===== PERFORMANCE REPORT TAB (auto-installed) ===== */
 

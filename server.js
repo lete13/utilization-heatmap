@@ -48,11 +48,14 @@ if (connStr) {
   // Create table on first run
   pool.query(`
     CREATE TABLE IF NOT EXISTS app_data (
-      key         VARCHAR(50) PRIMARY KEY,
+      key         VARCHAR(120) PRIMARY KEY,
       data        JSONB       NOT NULL,
       updated_at  TIMESTAMPTZ DEFAULT NOW()
     );
   `).then(() => {
+    // widen key column if an older 50-char version exists (safe no-op otherwise)
+    return pool.query(`ALTER TABLE app_data ALTER COLUMN key TYPE VARCHAR(120);`).catch(() => {});
+  }).then(() => {
     console.log('  ✓  PostgreSQL ready');
   }).catch(e => {
     console.error('  ✗  PostgreSQL init error:', e.message);
@@ -206,6 +209,44 @@ app.get('/api/db/data', async (req, res) => {
   }
 });
 
+// Harvest every note/flag text field Hosthub puts on a reservation.
+// Known fields come from the API spec; we ALSO scan for any undocumented field
+// whose name looks like an action/urgent/note/flag/tag (newer Hosthub versions
+// may expose fields the 2019 spec doesn't list). Zero extra API calls — these
+// all arrive inside the calendar-events payload the sync already downloads.
+const HH_KNOWN_NOTE_FIELDS = [
+  { key: 'notes',         label: 'Note' },
+  { key: 'guest_remarks', label: 'Guest' },
+  { key: 'room_remarks',  label: 'Room' },
+  { key: 'hold_reason',   label: 'Hold' },
+];
+const HH_FLAGGY = /(^|_)(action|urgent|urgent_action|flag|flags|tag|tags|priority|alert|todo|task|remark|remarks|note|notes)($|_)/i;
+function harvestHhNotes(ev) {
+  const out = [];
+  const seen = new Set();
+  for (const f of HH_KNOWN_NOTE_FIELDS) {
+    const v = ev?.[f.key];
+    if (typeof v === 'string' && v.trim()) { out.push({ label: f.label, text: v.trim() }); seen.add(f.key); }
+  }
+  // undocumented / newer fields (e.g. action, urgent_action) — auto-detect
+  for (const [k, v] of Object.entries(ev || {})) {
+    if (seen.has(k) || !HH_FLAGGY.test(k)) continue;
+    let text = null;
+    if (typeof v === 'string' && v.trim()) text = v.trim();
+    else if (Array.isArray(v) && v.length) {
+      text = v.map(x => (typeof x === 'string' ? x : (x && (x.name || x.title || x.label || x.content)) || ''))
+              .filter(Boolean).join(', ');
+    } else if (v && typeof v === 'object') {
+      text = v.content || v.text || v.name || v.title || null;
+    }
+    if (text && String(text).trim()) {
+      const label = k.replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase()).trim();
+      out.push({ label, text: String(text).trim() });
+    }
+  }
+  return out;
+}
+
 // POST /api/booking-notes — batch-fetch Hosthub notes for a set of reservations.
 // Body: { ids: ["ce123", ...] } → { ce123: [{content, created, by}], ... }
 // One Hosthub call per id (their API has no bulk endpoint), limited concurrency.
@@ -238,6 +279,67 @@ app.post('/api/booking-notes', async (req, res) => {
   }
   await Promise.all(Array.from({ length: Math.min(5, ids.length) }, worker));
   res.json(out);
+});
+
+// ── Per-rental amenities & FAQs ─────────────────────────────────────────────
+// One isolated record per rental, keyed `rental:<id>` in app_data. Content is
+// { amenities: {itemId:{on,note}}, faqs:[{q,a}], houseRules:{...}, updated }.
+function _rentalKey(id) {
+  const safe = String(id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 100);
+  return safe ? 'rental:' + safe : null;
+}
+
+// GET /api/rental-info/:id — fetch one rental's amenities + FAQs
+app.get('/api/rental-info/:id', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'No database configured.' });
+  const key = _rentalKey(req.params.id);
+  if (!key) return res.status(400).json({ error: 'Invalid rental id.' });
+  try {
+    const r = await pool.query('SELECT data, updated_at FROM app_data WHERE key = $1', [key]);
+    if (!r.rows[0]) return res.json({ amenities: {}, faqs: [], houseRules: {}, updated: null });
+    res.json({ ...r.rows[0].data, updated: r.rows[0].updated_at });
+  } catch (e) {
+    console.error('[rental-info] read error:', e.message);
+    res.status(500).json({ error: 'Read failed.' });
+  }
+});
+
+// POST /api/rental-info/:id — save one rental's amenities + FAQs
+app.post('/api/rental-info/:id', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'No database configured.' });
+  const key = _rentalKey(req.params.id);
+  if (!key) return res.status(400).json({ error: 'Invalid rental id.' });
+  try {
+    const body = req.body || {};
+    const clean = {
+      amenities: (body.amenities && typeof body.amenities === 'object') ? body.amenities : {},
+      faqs: Array.isArray(body.faqs) ? body.faqs.filter(f => f && (f.q || f.a)).slice(0, 200) : [],
+      houseRules: (body.houseRules && typeof body.houseRules === 'object') ? body.houseRules : {},
+    };
+    await pool.query(
+      `INSERT INTO app_data (key, data, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET data = $2, updated_at = NOW()`,
+      [key, clean]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[rental-info] write error:', e.message);
+    res.status(500).json({ error: 'Save failed.' });
+  }
+});
+
+// GET /api/rental-info — bulk fetch all rental records (for export/overview)
+app.get('/api/rental-info', async (req, res) => {
+  if (!pool) return res.json({});
+  try {
+    const r = await pool.query("SELECT key, data FROM app_data WHERE key LIKE 'rental:%'");
+    const out = {};
+    r.rows.forEach(row => { out[row.key.replace('rental:', '')] = row.data; });
+    res.json(out);
+  } catch (e) {
+    console.error('[rental-info] bulk read error:', e.message);
+    res.json({});
+  }
 });
 
 // GET /api/history — rolling per-property daily snapshots for trend detection
@@ -585,6 +687,7 @@ async function runSync(apiKey, onLog) {
     return {
       id:ev.id, aptId:_aptMatch?.id||'', aptName:_aptName, cancelled:ev.is_visible===false, cancelledAt:ev.cancelled_at||null,
       created:ev.created||null, createdOnChannel:ev.created_on_channel||null,
+      hhNotes:harvestHhNotes(ev),
       platform: (()=>{
         const code=(ev.source?.channel_type_code||'').toLowerCase().replace(/[^a-z]/g,'');
         const n=(ev.source?.name||'').toLowerCase();
