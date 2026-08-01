@@ -209,78 +209,6 @@ app.get('/api/db/data', async (req, res) => {
   }
 });
 
-// Harvest every note/flag text field Hosthub puts on a reservation.
-// Known fields come from the API spec; we ALSO scan for any undocumented field
-// whose name looks like an action/urgent/note/flag/tag (newer Hosthub versions
-// may expose fields the 2019 spec doesn't list). Zero extra API calls — these
-// all arrive inside the calendar-events payload the sync already downloads.
-const HH_KNOWN_NOTE_FIELDS = [
-  { key: 'notes',         label: 'Note' },
-  { key: 'guest_remarks', label: 'Guest' },
-  { key: 'room_remarks',  label: 'Room' },
-  { key: 'hold_reason',   label: 'Hold' },
-];
-const HH_FLAGGY = /(^|_)(action|urgent|urgent_action|flag|flags|tag|tags|priority|alert|todo|task|remark|remarks|note|notes)($|_)/i;
-function harvestHhNotes(ev) {
-  const out = [];
-  const seen = new Set();
-  for (const f of HH_KNOWN_NOTE_FIELDS) {
-    const v = ev?.[f.key];
-    if (typeof v === 'string' && v.trim()) { out.push({ label: f.label, text: v.trim() }); seen.add(f.key); }
-  }
-  // undocumented / newer fields (e.g. action, urgent_action) — auto-detect
-  for (const [k, v] of Object.entries(ev || {})) {
-    if (seen.has(k) || !HH_FLAGGY.test(k)) continue;
-    let text = null;
-    if (typeof v === 'string' && v.trim()) text = v.trim();
-    else if (Array.isArray(v) && v.length) {
-      text = v.map(x => (typeof x === 'string' ? x : (x && (x.name || x.title || x.label || x.content)) || ''))
-              .filter(Boolean).join(', ');
-    } else if (v && typeof v === 'object') {
-      text = v.content || v.text || v.name || v.title || null;
-    }
-    if (text && String(text).trim()) {
-      const label = k.replace(/_/g, ' ').replace(/\b\w/g, m => m.toUpperCase()).trim();
-      out.push({ label, text: String(text).trim() });
-    }
-  }
-  return out;
-}
-
-// POST /api/booking-notes — batch-fetch Hosthub notes for a set of reservations.
-// Body: { ids: ["ce123", ...] } → { ce123: [{content, created, by}], ... }
-// One Hosthub call per id (their API has no bulk endpoint), limited concurrency.
-app.post('/api/booking-notes', async (req, res) => {
-  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean).slice(0, 80) : [];
-  if (!ids.length) return res.json({});
-  const apiKey = SERVER_API_KEY || (pool ? await getStoredApiKey() : null);
-  if (!apiKey) return res.status(400).json({ error: 'No Hosthub API key configured.' });
-  const out = {};
-  let i = 0;
-  async function worker() {
-    while (i < ids.length) {
-      const id = ids[i++];
-      try {
-        const r = await fetch(`${BASE}/calendar-events/${encodeURIComponent(id)}/notes`, {
-          headers: { Authorization: apiKey },
-        });
-        if (!r.ok) { out[id] = []; continue; }
-        const j = await r.json().catch(() => null);
-        const list = Array.isArray(j?.data) ? j.data : (Array.isArray(j) ? j : []);
-        out[id] = list
-          .filter(n => n && n.status !== 'deleted' && n.content)
-          .map(n => ({
-            content: String(n.content),
-            created: n.created || null,
-            by: (n.created_by && (n.created_by.name || n.created_by.first_name)) || '',
-          }));
-      } catch (e) { out[id] = []; }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(5, ids.length) }, worker));
-  res.json(out);
-});
-
 // ── Per-rental amenities & FAQs ─────────────────────────────────────────────
 // One isolated record per rental, keyed `rental:<id>` in app_data. Content is
 // { amenities: {itemId:{on,note}}, faqs:[{q,a}], houseRules:{...}, updated }.
@@ -688,7 +616,6 @@ async function runSync(apiKey, onLog) {
     return {
       id:ev.id, aptId:_aptMatch?.id||'', aptName:_aptName, cancelled:ev.is_visible===false, cancelledAt:ev.cancelled_at||null,
       created:ev.created||null, createdOnChannel:ev.created_on_channel||null,
-      hhNotes:harvestHhNotes(ev),
       platform: (()=>{
         const code=(ev.source?.channel_type_code||'').toLowerCase().replace(/[^a-z]/g,'');
         const n=(ev.source?.name||'').toLowerCase();
