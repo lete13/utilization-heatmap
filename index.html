@@ -6854,14 +6854,28 @@ loadFromDb()
 
   async function _save() {
     if (!_selRentalId) return;
+    let payload;
+    try { payload = JSON.stringify(_cur); }
+    catch (e) { if (typeof toast === 'function') toast('Save failed: data could not be serialized.', 'err'); return; }
+    const sizeMB = (payload.length / 1048576).toFixed(1);
     try {
       const r = await fetch('/api/rental-info/' + encodeURIComponent(_selRentalId), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(_cur),
+        body: payload,
       });
-      if (r.ok) { _dirty = false; if (typeof toast === 'function') toast('Saved.', 'ok'); renderPropInfo(); }
-      else if (typeof toast === 'function') toast('Save failed.', 'err');
-    } catch (e) { if (typeof toast === 'function') toast('Save failed (offline?).', 'err'); }
+      if (r.ok) { _dirty = false; if (typeof toast === 'function') toast('Saved.', 'ok'); renderPropInfo(); return; }
+      // non-OK: surface the actual reason
+      let reason = `HTTP ${r.status}`;
+      try { const j = await r.json(); if (j && j.error) reason = j.error; } catch (_) {}
+      if (r.status === 404) reason = 'endpoint not found — deploy the latest server.js';
+      else if (r.status === 503) reason = 'no database connected on the server';
+      else if (r.status === 413) reason = `payload too large (${sizeMB} MB) — a photo/PDF is too big`;
+      if (typeof toast === 'function') toast('Save failed: ' + reason, 'err');
+      console.error('[rental-info save] failed', r.status, reason, 'payload', sizeMB + 'MB');
+    } catch (e) {
+      if (typeof toast === 'function') toast('Save failed: network error (offline or blocked).', 'err');
+      console.error('[rental-info save] network error', e);
+    }
   }
 
   // expose handlers
@@ -6887,10 +6901,26 @@ loadFromDb()
   window.pinfoCompPhoto = function (itemId, slot, input) {
     const file = input && input.files && input.files[0];
     if (!file) return;
+    _cur.compliance[itemId] = _cur.compliance[itemId] || {};
+    // Receipts may be PDF; PDFs are stored as-is (no image compression).
+    if (file.type === 'application/pdf') {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        _cur.compliance[itemId][slot] = e.target.result;      // data:application/pdf;base64,…
+        _cur.compliance[itemId][slot + 'Type'] = 'pdf';
+        _cur.compliance[itemId][slot + 'Name'] = file.name || 'receipt.pdf';
+        _dirty = true; renderPropInfo();
+      };
+      reader.onerror = () => { if (typeof toast === 'function') toast('Could not read PDF.', 'err'); };
+      reader.readAsDataURL(file);
+      return;
+    }
+    // Otherwise treat as an image and compress.
     _compressImage(file, (dataUrl) => {
       if (!dataUrl) { if (typeof toast === 'function') toast('Could not read image.', 'err'); return; }
-      _cur.compliance[itemId] = _cur.compliance[itemId] || {};
       _cur.compliance[itemId][slot] = dataUrl;
+      _cur.compliance[itemId][slot + 'Type'] = 'image';
+      delete _cur.compliance[itemId][slot + 'Name'];
       _dirty = true; renderPropInfo();
     });
   };
@@ -6902,7 +6932,36 @@ loadFromDb()
     if (el) { const st = _complianceStatus(val); el.outerHTML = _compStatusPill(itemId, st); }
   };
   window.pinfoCompPhotoDel = function (itemId, slot) {
-    if (_cur.compliance[itemId]) { delete _cur.compliance[itemId][slot]; _dirty = true; renderPropInfo(); }
+    if (_cur.compliance[itemId]) {
+      delete _cur.compliance[itemId][slot];
+      delete _cur.compliance[itemId][slot + 'Type'];
+      delete _cur.compliance[itemId][slot + 'Name'];
+      _dirty = true; renderPropInfo();
+    }
+  };
+  // Open a stored photo or PDF in an in-page lightbox overlay.
+  window.pinfoCompOpen = function (itemId, slot) {
+    const rec = _cur.compliance[itemId] || {};
+    const data = rec[slot]; if (!data) return;
+    const isPdf = rec[slot + 'Type'] === 'pdf';
+    const name = rec[slot + 'Name'] || (isPdf ? 'receipt.pdf' : (_amLabel ? '' : ''));
+    let lb = document.getElementById('pinfo-lightbox');
+    if (!lb) {
+      lb = document.createElement('div');
+      lb.id = 'pinfo-lightbox';
+      lb.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:99999;padding:24px';
+      lb.addEventListener('click', (e) => { if (e.target === lb) lb.remove(); });
+      document.addEventListener('keydown', function esc(ev){ if(ev.key==='Escape'){ const x=document.getElementById('pinfo-lightbox'); if(x)x.remove(); } });
+      document.body.appendChild(lb);
+    }
+    const inner = isPdf
+      ? `<iframe src="${data}" style="width:90vw;height:90vh;border:none;background:#fff;border-radius:8px"></iframe>`
+      : `<img src="${data}" style="max-width:92vw;max-height:92vh;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,.5)">`;
+    lb.innerHTML = `<div style="position:relative;display:flex;flex-direction:column;align-items:center;gap:10px">
+      ${name ? `<div style="color:#fff;font-size:13px">${_esc(name)}</div>` : ''}
+      ${inner}
+      <button onclick="var x=document.getElementById('pinfo-lightbox');if(x)x.remove()" style="position:absolute;top:-14px;right:-14px;width:32px;height:32px;border-radius:50%;border:none;background:#fff;color:#1a1a2e;font-size:18px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)">×</button>
+    </div>`;
   };
   // Copy an amenity as "Label: note" (or just the label) ready to paste in chat.
   window.pinfoCopy = function (aid, btn) {
@@ -6957,16 +7016,26 @@ loadFromDb()
   }
   function _compPhotoSlot(itemId, slot, label) {
     const rec = _cur.compliance[itemId] || {};
-    const img = rec[slot];
-    if (img) {
+    const data = rec[slot];
+    const isPdf = rec[slot + 'Type'] === 'pdf';
+    const allowPdf = (slot === 'receiptPhoto');   // receipts may be PDF
+    if (data) {
+      if (isPdf) {
+        return `<div style="position:relative;display:inline-block">
+          <div onclick="pinfoCompOpen('${itemId}','${slot}')" title="${_esc(rec[slot + 'Name'] || 'receipt.pdf')} — click to open" style="width:54px;height:54px;border-radius:6px;border:1px solid #e0e0e6;background:#fdecea;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;gap:1px">
+            <span style="font-size:16px">📄</span><span style="font-size:8px;color:#c0392b;font-weight:600">PDF</span>
+          </div>
+          <button onclick="pinfoCompPhotoDel('${itemId}','${slot}')" title="Remove" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:#c0392b;color:#fff;font-size:11px;cursor:pointer;line-height:1;padding:0">×</button>
+        </div>`;
+      }
       return `<div style="position:relative;display:inline-block">
-        <img src="${img}" style="width:54px;height:54px;object-fit:cover;border-radius:6px;border:1px solid #e0e0e6;cursor:pointer" title="${label} — click to view" onclick="var w=window.open('');w.document.write('<img src=&quot;${img}&quot; style=&quot;max-width:100%&quot;>')">
+        <img src="${data}" style="width:54px;height:54px;object-fit:cover;border-radius:6px;border:1px solid #e0e0e6;cursor:pointer" title="${label} — click to view" onclick="pinfoCompOpen('${itemId}','${slot}')">
         <button onclick="pinfoCompPhotoDel('${itemId}','${slot}')" title="Remove" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:#c0392b;color:#fff;font-size:11px;cursor:pointer;line-height:1;padding:0">×</button>
       </div>`;
     }
     return `<label style="display:inline-flex;flex-direction:column;align-items:center;justify-content:center;width:54px;height:54px;border:1px dashed #c8ccd8;border-radius:6px;cursor:pointer;font-size:9px;color:#9CA3AF;text-align:center;gap:1px">
-      <span style="font-size:15px;line-height:1">＋</span>${label}
-      <input type="file" accept="image/*" onchange="pinfoCompPhoto('${itemId}','${slot}',this)" style="display:none">
+      <span style="font-size:15px;line-height:1">＋</span>${label}${allowPdf ? '<span style="font-size:7px">img/pdf</span>' : ''}
+      <input type="file" accept="${allowPdf ? 'image/*,application/pdf' : 'image/*'}" onchange="pinfoCompPhoto('${itemId}','${slot}',this)" style="display:none">
     </label>`;
   }
   function _complianceBoardHtml() {
