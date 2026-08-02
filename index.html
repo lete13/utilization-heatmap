@@ -6773,6 +6773,7 @@ loadFromDb()
 
   // ── Compliance board (Law 5170/2025 short-term-rental requirements) ─────────
   const COMPLIANCE_ITEMS = [
+    { id:'ama', label:'ΑΜΑ (registry number)', type:'ama' },
     { id:'liability_insurance', label:'Liability insurance' },
     { id:'disinfection',        label:'Disinfection / rodent control' },
     { id:'smoke_detector',      label:'Fire alarm / smoke detector' },
@@ -6924,6 +6925,10 @@ loadFromDb()
       _dirty = true; renderPropInfo();
     });
   };
+  window.pinfoAmaNumber = function (val) {
+    _cur.compliance.ama = _cur.compliance.ama || {};
+    _cur.compliance.ama.number = val; _dirty = true; _markDirty();
+  };
   window.pinfoCompDate = function (itemId, val) {
     _cur.compliance[itemId] = _cur.compliance[itemId] || {};
     _cur.compliance[itemId].due = val; _dirty = true; _markDirty();
@@ -7041,6 +7046,18 @@ loadFromDb()
   function _complianceBoardHtml() {
     const rows = COMPLIANCE_ITEMS.map(it => {
       const rec = _cur.compliance[it.id] || {};
+      if (it.type === 'ama') {
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f3">
+          <div style="flex:1;min-width:150px">
+            <div style="font-size:13px;font-weight:600;color:#1a1a2e">${_esc(it.label)}</div>
+            <div style="margin-top:3px"><input type="text" value="${_esc(rec.number)}" oninput="pinfoAmaNumber(this.value)" placeholder="fill in the ΑΜΑ number…" style="font-size:12px;padding:4px 8px;border:1px solid #e0e0e6;border-radius:6px;width:200px"></div>
+          </div>
+          <div style="display:flex;gap:6px">
+            ${_compPhotoSlot(it.id, 'receiptPhoto', 'attach')}
+          </div>
+          <div style="width:96px"></div>
+        </div>`;
+      }
       const st = _complianceStatus(rec.due);
       return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f3">
         <div style="flex:1;min-width:150px">
