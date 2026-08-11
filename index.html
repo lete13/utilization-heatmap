@@ -6308,7 +6308,8 @@ function _opsAutoRows(date) {
     const _isPrepKeyword = (s) => /(\b(prep(aration|aring|s)?)\b|προετοιμασ[ίι]α)/i.test(String(s || ''));
     const _isOwnerKeyword = (s) => /(\bowner('?s)?\b|ιδιοκτ[ήη]τη)/i.test(String(s || ''));
     let isExtended = false, isPreparation = false;
-    const isOwner = _isOwnerKeyword(bk.guestName) || (nxt && _isOwnerKeyword(nxt.guestName));
+    // Owner highlight fires only for owner CHECK-INS (the incoming booking).
+    const isOwner = !!(nxt && _isOwnerKeyword(nxt.guestName));
     if (nxt) {
       const co = _normName(bk.guestName), ci = _normName(nxt.guestName);
       if (_isPrepKeyword(nxt.guestName) || _isPrepKeyword(bk.guestName)) {
