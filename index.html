@@ -6682,20 +6682,23 @@ function _refreshCleaningTable() {
 function _opsFindRow(key) {
   return _opsRows.find(function(r){ return String(r.aptId||r.aptName) === String(key); });
 }
-// Toggle cleaned via stable key; re-render so the row moves to the bottom.
+// Toggle cleaned via stable key; save synchronously, THEN re-render so the row
+// moves to the bottom with the fresh state (avoids reload of stale snapshot).
 function opsToggleCleanDoneKey(key, checked) {
   const r = _opsFindRow(key);
   if (!r) return;
   r.cleanDone = !!checked;
-  if (typeof _opsAutoSave === 'function') _opsAutoSave();
+  clearTimeout(_opsSaveTimer);        // cancel any pending debounced save
+  _opsSaveNow();                       // persist immediately (incl. any cleaner already set on _opsRows)
   if (typeof renderOps === 'function') renderOps();
 }
-// Assign cleaner via stable key; NO re-render (keeps the dropdown responsive).
+// Assign cleaner via stable key; save immediately, no re-render.
 function opsSetCleanerKey(key, val) {
   const r = _opsFindRow(key);
   if (!r) return;
   r.cleanerName = val;
-  if (typeof _opsAutoSave === 'function') _opsAutoSave();
+  clearTimeout(_opsSaveTimer);
+  _opsSaveNow();
 }
 
 function opsToggleCleanDone(gi, cb) {
@@ -6730,6 +6733,18 @@ function opsToggleCleaned(i) {
   // Re-render just this cell
   const tbody = document.getElementById('ops-tbody');
   if (tbody) { tbody.innerHTML = _opsRows.map((row,idx) => _opsBuildRow(row,idx)).join(''); }
+}
+
+// Immediate (non-debounced) snapshot save — used when we must persist before a
+// re-render, so _opsLoadData reads the fresh data instead of the old snapshot.
+function _opsSaveNow() {
+  _opsEnsure();
+  S.daily.snapshots[_opsDate] = {
+    date: _opsDate, savedAt: Date.now(),
+    rows: JSON.parse(JSON.stringify(_opsRows)),
+    notes: _opsNotes,
+  };
+  if (typeof save === 'function') save();
 }
 
 function _opsAutoSave() {
