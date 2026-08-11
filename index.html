@@ -6306,13 +6306,16 @@ function _opsAutoRows(date) {
     const _normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
     const _isExtendKeyword = (s) => /(\b(extend(ed|s|ing)?|extension)\b|παρ[αά]ταση)/i.test(String(s || ''));
     const _isPrepKeyword = (s) => /(\b(prep(aration|aring|s)?)\b|προετοιμασ[ίι]α)/i.test(String(s || ''));
+    const _isMaintKeyword = (s) => /(\b(maintenance|housekeeping)\b|συντήρηση)/i.test(String(s || ''));
     const _isOwnerKeyword = (s) => /(\bowner('?s)?\b|ιδιοκτ[ήη]τη)/i.test(String(s || ''));
-    let isExtended = false, isPreparation = false;
+    let isExtended = false, isPreparation = false, isMaintenance = false;
     // Owner highlight fires only for owner CHECK-INS (the incoming booking).
     const isOwner = !!(nxt && _isOwnerKeyword(nxt.guestName));
     if (nxt) {
       const co = _normName(bk.guestName), ci = _normName(nxt.guestName);
-      if (_isPrepKeyword(nxt.guestName) || _isPrepKeyword(bk.guestName)) {
+      if (_isMaintKeyword(nxt.guestName) || _isMaintKeyword(bk.guestName)) {
+        isMaintenance = true;                                // maintenance/housekeeping block
+      } else if (_isPrepKeyword(nxt.guestName) || _isPrepKeyword(bk.guestName)) {
         isPreparation = true;                                // preparation block/hold
       } else if (_isExtendKeyword(nxt.guestName) || _isExtendKeyword(bk.guestName)) {
         isExtended = true;                                   // (1) explicit "extend"
@@ -6329,7 +6332,7 @@ function _opsAutoRows(date) {
       aptId: bk.aptId||'',
       aptName: bk.aptName||'',
       checkoutGuest: bk.guestName||'',
-      isExtended, isPreparation, isOwner,
+      isExtended, isPreparation, isMaintenance, isOwner,
       alreadyCleaned: false, cleanedDate: null,
       lateCheckout: false,
       checkoutRequested: false,
@@ -6358,20 +6361,22 @@ function _opsAutoRows(date) {
     // checkout) still counts as an extension/preparation, not a fresh arrival.
     const _extKw = /(\b(extend(ed|s|ing)?|extension)\b|παρ[αά]ταση)/i.test(String(bk.guestName || ''));
     const _prepKw = /(\b(prep(aration|aring|s)?)\b|προετοιμασ[ίι]α)/i.test(String(bk.guestName || ''));
+    const _maintKw = /(\b(maintenance|housekeeping)\b|συντήρηση)/i.test(String(bk.guestName || ''));
     const _ownerKw = /(\bowner('?s)?\b|ιδιοκτ[ήη]τη)/i.test(String(bk.guestName || ''));
     rows.push({
       aptId: bk.aptId||'', aptName: bk.aptName||'',
-      checkoutGuest: '', isCheckinOnly: !(_extKw || _prepKw),
-      isExtended: _extKw && !_prepKw, isPreparation: _prepKw, isOwner: _ownerKw,
+      checkoutGuest: '', isCheckinOnly: !(_extKw || _prepKw || _maintKw),
+      isExtended: _extKw && !_prepKw && !_maintKw, isPreparation: _prepKw && !_maintKw,
+      isMaintenance: _maintKw, isOwner: _ownerKw,
       alreadyCleaned: false, cleanedDate: null, lateCheckout: false, checkoutRequested: false,
       checkinSameDay: 'checkin_only',
       nextNights: bk.nights||null, nextGuest: bk.guestName||'',
       people: bk.guests||'', arrivalTime: '', comments: '',
     });
   });
-  // Extended stays & preparation blocks sink to the bottom (no turnover).
-  const _active = rows.filter(r => !r.isExtended && !r.isPreparation);
-  const _special = rows.filter(r => r.isExtended || r.isPreparation);
+  // Extended stays, preparation & maintenance blocks sink to the bottom.
+  const _active = rows.filter(r => !r.isExtended && !r.isPreparation && !r.isMaintenance);
+  const _special = rows.filter(r => r.isExtended || r.isPreparation || r.isMaintenance);
   return [..._active, ..._special];
 }
 
@@ -6403,6 +6408,7 @@ function _opsLoadData(date) {
     const fresh = freshById[r.aptId||r.aptName];
     const autoExt = fresh ? !!fresh.isExtended : !!r.isExtended;
     const autoPrep = fresh ? !!fresh.isPreparation : !!r.isPreparation;
+    const autoMaint = fresh ? !!fresh.isMaintenance : !!r.isMaintenance;
     const isOwner = fresh ? !!fresh.isOwner : !!r.isOwner;
     const isExtended = (r.extendedManual === true) ? true
                      : (r.extendedManual === false) ? false
@@ -6410,11 +6416,14 @@ function _opsLoadData(date) {
     const isPreparation = (r.preparationManual === true) ? true
                         : (r.preparationManual === false) ? false
                         : autoPrep;
-    return { ...r, isExtended, isPreparation, isOwner };
+    const isMaintenance = (r.maintenanceManual === true) ? true
+                        : (r.maintenanceManual === false) ? false
+                        : autoMaint;
+    return { ...r, isExtended, isPreparation, isMaintenance, isOwner };
   });
-  // Extended & preparation rows sink to the bottom.
-  const _active = merged.filter(r => !r.isExtended && !r.isPreparation);
-  const _special = merged.filter(r => r.isExtended || r.isPreparation);
+  // Extended, preparation & maintenance rows sink to the bottom.
+  const _active = merged.filter(r => !r.isExtended && !r.isPreparation && !r.isMaintenance);
+  const _special = merged.filter(r => r.isExtended || r.isPreparation || r.isMaintenance);
 
   return {
     rows: [..._active, ..._special],
@@ -6424,6 +6433,7 @@ function _opsLoadData(date) {
 }
 
 function _opsRowBg(row) {
+  if (row.isMaintenance) return '#FEF3C7'; // amber — maintenance/housekeeping block
   if (row.isPreparation) return '#FDF2F8'; // soft pink — preparation, no turnover
   if (row.isExtended) return '#F3F4F6'; // muted grey — extended stay, no turnover
   if (row.isCheckinOnly) return '#EFF6FF'; // light blue — arriving today, no checkout
@@ -6490,7 +6500,7 @@ function _opsBuildRow(row, i) {
   const lTxt = row.lateCheckout ? '\u26a0 LATE CO' : 'Late CO';
   return `<tr style="background:${_ownerBg};${_ownerBorder}">
     <td style="padding:4px 6px;border:1px solid #ddd;text-align:center;font-size:11px;color:#666">${i+1}</td>
-    <td style="padding:4px 8px;border:1px solid #ddd;font-size:12px;font-weight:600;color:${(row.isExtended||row.isPreparation) ? '#9CA3AF' : '#1a1a2e'}${(row.isExtended||row.isPreparation) ? ';text-decoration:line-through' : ''}">${row.aptName}${row.isPreparation ? ' <span style="text-decoration:none;background:#FBCFE8;color:#9D174D;font-size:9px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle" title="Preparation block — no guest turnover">PREPARATION</span>' : row.isExtended ? ' <span style="text-decoration:none;background:#E5E7EB;color:#4B5563;font-size:9px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle" title="Same guest checking out and back in the same day — no turnover needed">EXTENDED</span>' : ''}${row.isOwner ? ' <span style="background:#FCD34D;color:#7C2D12;font-size:9px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle;border:1px solid #DC2626" title="Owner stay/block — prepare the apartment as normal">OWNER</span>' : ''}${(function(){const mi=(typeof window.aptMetroInfo==='function')?window.aptMetroInfo(_opsAptOf(row)):null;return (mi&&mi.station)?'<div style="font-size:10px;font-weight:400;color:#9CA3AF;text-decoration:none" title="Nearest metro station (drives the row order)">Ⓜ '+mi.station+'</div>':'';})()}</td>
+    <td style="padding:4px 8px;border:1px solid #ddd;font-size:12px;font-weight:600;color:${(row.isExtended||row.isPreparation||row.isMaintenance) ? '#9CA3AF' : '#1a1a2e'}${(row.isExtended||row.isPreparation||row.isMaintenance) ? ';text-decoration:line-through' : ''}">${row.aptName}${row.isMaintenance ? ' <span style="text-decoration:none;background:#FDE68A;color:#92400E;font-size:9px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle" title="Maintenance / housekeeping block — no guest turnover">MAINTENANCE</span>' : row.isPreparation ? ' <span style="text-decoration:none;background:#FBCFE8;color:#9D174D;font-size:9px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle" title="Preparation block — no guest turnover">PREPARATION</span>' : row.isExtended ? ' <span style="text-decoration:none;background:#E5E7EB;color:#4B5563;font-size:9px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle" title="Same guest checking out and back in the same day — no turnover needed">EXTENDED</span>' : ''}${row.isOwner ? ' <span style="background:#FCD34D;color:#7C2D12;font-size:9px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle;border:1px solid #DC2626" title="Owner stay/block — prepare the apartment as normal">OWNER</span>' : ''}${(function(){const mi=(typeof window.aptMetroInfo==='function')?window.aptMetroInfo(_opsAptOf(row)):null;return (mi&&mi.station)?'<div style="font-size:10px;font-weight:400;color:#9CA3AF;text-decoration:none" title="Nearest metro station (drives the row order)">Ⓜ '+mi.station+'</div>':'';})()}</td>
     <td style="padding:4px 6px;border:1px solid #ddd;text-align:center">
       <button onclick="opsToggleLate(${i})"
         style="background:${lBg};border:${lBrd};border-radius:4px;padding:3px 8px;font-size:10px;font-weight:700;color:${lClr};cursor:pointer;white-space:nowrap;font-family:inherit">
@@ -6520,7 +6530,7 @@ function _opsBuildRow(row, i) {
         placeholder=""
         style="width:100%;box-sizing:border-box;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e">
     </td>
-    <td style="padding:4px 4px;border:1px solid #ddd;text-align:center;width:74px;white-space:nowrap">
+    <td style="padding:4px 4px;border:1px solid #ddd;text-align:center;width:96px;white-space:nowrap">
       <button onclick="opsToggleExtended(${i})"
         title="${row.isExtended ? 'Marked extended (no turnover) — click to unmark' : 'Mark as extended stay (same guest, no turnover)'}"
         style="background:${row.isExtended ? '#4B5563' : 'none'};border:${row.isExtended ? 'none' : '1px solid #E5E7EB'};border-radius:4px;cursor:pointer;color:${row.isExtended ? '#fff' : '#9CA3AF'};font-size:10px;font-weight:700;line-height:1;padding:3px 5px;vertical-align:middle"
@@ -6529,6 +6539,10 @@ function _opsBuildRow(row, i) {
         title="${row.isPreparation ? 'Marked preparation (no turnover) — click to unmark' : 'Mark as preparation (no turnover)'}"
         style="background:${row.isPreparation ? '#9D174D' : 'none'};border:${row.isPreparation ? 'none' : '1px solid #E5E7EB'};border-radius:4px;cursor:pointer;color:${row.isPreparation ? '#fff' : '#9CA3AF'};font-size:10px;font-weight:700;line-height:1;padding:3px 5px;vertical-align:middle"
         onmouseover="if(!${row.isPreparation})this.style.color='#9D174D'" onmouseout="if(!${row.isPreparation})this.style.color='#9CA3AF'">🧹</button>
+      <button onclick="opsToggleMaintenance(${i})"
+        title="${row.isMaintenance ? 'Marked maintenance (no turnover) — click to unmark' : 'Mark as maintenance / housekeeping (no turnover)'}"
+        style="background:${row.isMaintenance ? '#92400E' : 'none'};border:${row.isMaintenance ? 'none' : '1px solid #E5E7EB'};border-radius:4px;cursor:pointer;color:${row.isMaintenance ? '#fff' : '#9CA3AF'};font-size:10px;font-weight:700;line-height:1;padding:3px 5px;vertical-align:middle"
+        onmouseover="if(!${row.isMaintenance})this.style.color='#92400E'" onmouseout="if(!${row.isMaintenance})this.style.color='#9CA3AF'">🔧</button>
       <button onclick="opsRemoveRow(${i})"
         title="Remove from today's list"
         style="background:none;border:none;cursor:pointer;color:#D1D5DB;font-size:18px;line-height:1;padding:0;vertical-align:middle"
@@ -6648,8 +6662,8 @@ function opsToggleExtended(i) {
   const now = !_opsRows[i].isExtended;
   _opsRows[i].isExtended = now;
   _opsRows[i].extendedManual = now;
-  if (now) { _opsRows[i].isPreparation = false; _opsRows[i].preparationManual = false; _opsRows[i].isCheckinOnly = false; }
-  else if (!_opsRows[i].checkoutGuest && _opsRows[i].checkinSameDay === 'checkin_only' && !_opsRows[i].isPreparation) {
+  if (now) { _opsRows[i].isPreparation = false; _opsRows[i].preparationManual = false; _opsRows[i].isMaintenance = false; _opsRows[i].maintenanceManual = false; _opsRows[i].isCheckinOnly = false; }
+  else if (!_opsRows[i].checkoutGuest && _opsRows[i].checkinSameDay === 'checkin_only' && !_opsRows[i].isPreparation && !_opsRows[i].isMaintenance) {
     _opsRows[i].isCheckinOnly = true;
   }
   _opsResortSpecial();
@@ -6660,16 +6674,28 @@ function opsTogglePreparation(i) {
   const now = !_opsRows[i].isPreparation;
   _opsRows[i].isPreparation = now;
   _opsRows[i].preparationManual = now;
-  if (now) { _opsRows[i].isExtended = false; _opsRows[i].extendedManual = false; _opsRows[i].isCheckinOnly = false; }
-  else if (!_opsRows[i].checkoutGuest && _opsRows[i].checkinSameDay === 'checkin_only' && !_opsRows[i].isExtended) {
+  if (now) { _opsRows[i].isExtended = false; _opsRows[i].extendedManual = false; _opsRows[i].isMaintenance = false; _opsRows[i].maintenanceManual = false; _opsRows[i].isCheckinOnly = false; }
+  else if (!_opsRows[i].checkoutGuest && _opsRows[i].checkinSameDay === 'checkin_only' && !_opsRows[i].isExtended && !_opsRows[i].isMaintenance) {
     _opsRows[i].isCheckinOnly = true;
   }
   _opsResortSpecial();
 }
-// Shared: re-sort active rows first, extended/preparation to the bottom; save.
+// Manual override for the MAINTENANCE flag.
+function opsToggleMaintenance(i) {
+  if (!_opsRows[i]) return;
+  const now = !_opsRows[i].isMaintenance;
+  _opsRows[i].isMaintenance = now;
+  _opsRows[i].maintenanceManual = now;
+  if (now) { _opsRows[i].isExtended = false; _opsRows[i].extendedManual = false; _opsRows[i].isPreparation = false; _opsRows[i].preparationManual = false; _opsRows[i].isCheckinOnly = false; }
+  else if (!_opsRows[i].checkoutGuest && _opsRows[i].checkinSameDay === 'checkin_only' && !_opsRows[i].isExtended && !_opsRows[i].isPreparation) {
+    _opsRows[i].isCheckinOnly = true;
+  }
+  _opsResortSpecial();
+}
+// Shared: re-sort active rows first, extended/preparation/maintenance to bottom; save.
 function _opsResortSpecial() {
-  const active = _opsRows.filter(r => !r.isExtended && !r.isPreparation);
-  const special = _opsRows.filter(r => r.isExtended || r.isPreparation);
+  const active = _opsRows.filter(r => !r.isExtended && !r.isPreparation && !r.isMaintenance);
+  const special = _opsRows.filter(r => r.isExtended || r.isPreparation || r.isMaintenance);
   _opsRows = [...active, ...special];
   const tbody = document.getElementById('ops-tbody');
   if (tbody) { tbody.innerHTML = _opsRows.map((row,idx) => _opsBuildRow(row,idx)).join(''); }
