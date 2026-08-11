@@ -6283,8 +6283,12 @@ function _opsAutoRows(date) {
   const [_y,_m,_d] = date.split('-');
   const dateFmt = parseInt(_d)+'/'+parseInt(_m)+'/'+_y; // e.g. "22/6/2026"
   const checkouts = S.bks.filter(b => b.checkOut === date || b.checkOut === dateFmt);
-  // Sort by aptName
-  checkouts.sort((a,b) => (a.aptName||'').localeCompare(b.aptName||''));
+  // Sort by metro proximity (falls back to A→Z until coordinates exist)
+  if (typeof window.aptProximityCompare === 'function') {
+    checkouts.sort((a,b) => window.aptProximityCompare(_opsAptOf(a), _opsAptOf(b)));
+  } else {
+    checkouts.sort((a,b) => (a.aptName||'').localeCompare(b.aptName||''));
+  }
   checkouts.forEach(bk => {
     const key = bk.aptId||bk.aptName;
     if (seen.has(key)) return;
@@ -6293,10 +6297,33 @@ function _opsAutoRows(date) {
     const nxt = S.bks.find(b =>
       b.aptId === bk.aptId && (b.checkIn === date || b.checkIn === dateFmt) && b.id !== bk.id
     );
+    // Extended stay: the same guest checks out and checks back in on the same
+    // day in the same apartment — no real turnover, so it's crossed out, tagged
+    // "extended", and pushed to the bottom of the list (handled below).
+    // Detection handles real-world naming: (1) a manual/offline booking named
+    // "extend"/"extension"/"παράταση", (2) identical guest names, or (3) a
+    // partial name (one contains the other, e.g. "Maria" vs "Maria Papa").
+    const _normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const _isExtendKeyword = (s) => /\b(extend(ed|s|ing)?|extension|παρ[αά]ταση)\b/i.test(String(s || ''));
+    let isExtended = false;
+    if (nxt) {
+      const co = _normName(bk.guestName), ci = _normName(nxt.guestName);
+      if (_isExtendKeyword(nxt.guestName) || _isExtendKeyword(bk.guestName)) {
+        isExtended = true;                                   // (1) explicit "extend"
+      } else if (co && ci && co === ci) {
+        isExtended = true;                                   // (2) exact match
+      } else if (co && ci) {
+        // (3) partial: one name contains the other, on a meaningful token (≥3 chars)
+        const shorter = co.length <= ci.length ? co : ci;
+        const longer  = co.length <= ci.length ? ci : co;
+        if (shorter.length >= 3 && (longer === shorter || longer.includes(shorter))) isExtended = true;
+      }
+    }
     rows.push({
       aptId: bk.aptId||'',
       aptName: bk.aptName||'',
       checkoutGuest: bk.guestName||'',
+      isExtended,
       alreadyCleaned: false, cleanedDate: null,
       lateCheckout: false,
       checkoutRequested: false,
@@ -6315,18 +6342,28 @@ function _opsAutoRows(date) {
     const key = b.aptId||b.aptName;
     return !seen.has(key);
   });
-  checkinOnly.sort((a,b) => (a.aptName||'').localeCompare(b.aptName||''));
+  if (typeof window.aptProximityCompare === 'function') {
+    checkinOnly.sort((a,b) => window.aptProximityCompare(_opsAptOf(a), _opsAptOf(b)));
+  } else {
+    checkinOnly.sort((a,b) => (a.aptName||'').localeCompare(b.aptName||''));
+  }
   checkinOnly.forEach(bk => {
+    // An offline booking named just "extend" (no matching same-day checkout)
+    // still counts as an extension, not a fresh arrival.
+    const _extKw = /\b(extend(ed|s|ing)?|extension|παρ[αά]ταση)\b/i.test(String(bk.guestName || ''));
     rows.push({
       aptId: bk.aptId||'', aptName: bk.aptName||'',
-      checkoutGuest: '', isCheckinOnly: true,
+      checkoutGuest: '', isCheckinOnly: !_extKw, isExtended: _extKw,
       alreadyCleaned: false, cleanedDate: null, lateCheckout: false, checkoutRequested: false,
       checkinSameDay: 'checkin_only',
       nextNights: bk.nights||null, nextGuest: bk.guestName||'',
       people: bk.guests||'', arrivalTime: '', comments: '',
     });
   });
-  return rows;
+  // Extended stays sink to the bottom (crossed out, no turnover needed).
+  const _active = rows.filter(r => !r.isExtended);
+  const _extended = rows.filter(r => r.isExtended);
+  return [..._active, ..._extended];
 }
 
 function _opsLoadData(date) {
@@ -6348,14 +6385,32 @@ function _opsLoadData(date) {
     }, 300);
   }
 
+  // Re-apply fresh EXTENDED detection onto snapshot rows (older snapshots were
+  // saved before this feature, or bookings may have changed). A manual override
+  // (extendedManual: true/false) always wins over auto-detection.
+  const freshById = {};
+  freshRows.forEach(r => { freshById[r.aptId||r.aptName] = r; });
+  const merged = [...snap.rows, ...newRows].map(r => {
+    const fresh = freshById[r.aptId||r.aptName];
+    const auto = fresh ? !!fresh.isExtended : !!r.isExtended;
+    const isExtended = (r.extendedManual === true) ? true
+                     : (r.extendedManual === false) ? false
+                     : auto;
+    return { ...r, isExtended };
+  });
+  // Extended rows sink to the bottom.
+  const _active = merged.filter(r => !r.isExtended);
+  const _extended = merged.filter(r => r.isExtended);
+
   return {
-    rows: [...snap.rows, ...newRows],
+    rows: [..._active, ..._extended],
     notes: snap.notes||'',
     savedAt: snap.savedAt,
   };
 }
 
 function _opsRowBg(row) {
+  if (row.isExtended) return '#F3F4F6'; // muted grey — extended stay, no turnover
   if (row.isCheckinOnly) return '#EFF6FF'; // light blue — arriving today, no checkout
   if (row.checkinSameDay === 'unknown') return '#FFF3CD';
   if (row.checkinSameDay === 'yes') return '#F0FFF4';
@@ -6398,6 +6453,16 @@ function _opsCheckoutDateCell(row, i) {
   </td>`;
 }
 
+// Resolve an ops row to its apartment record (for metro proximity + label).
+function _opsAptOf(row) {
+  return (S.apts || []).find(a => a.id === row.aptId) ||
+         (S.apts || []).find(a => a.name === row.aptName) || { name: row.aptName };
+}
+function _opsSortRows(rows) {
+  if (typeof window.aptProximityCompare !== 'function') return rows;
+  return rows.slice().sort((a, b) => window.aptProximityCompare(_opsAptOf(a), _opsAptOf(b)));
+}
+
 function _opsBuildRow(row, i) {
   const bg = _opsRowBg(row);
   const lBg  = row.lateCheckout ? '#FEF3C7' : 'transparent';
@@ -6406,7 +6471,7 @@ function _opsBuildRow(row, i) {
   const lTxt = row.lateCheckout ? '\u26a0 LATE CO' : 'Late CO';
   return `<tr style="background:${bg}">
     <td style="padding:4px 6px;border:1px solid #ddd;text-align:center;font-size:11px;color:#666">${i+1}</td>
-    <td style="padding:4px 8px;border:1px solid #ddd;font-size:12px;font-weight:600;color:#1a1a2e">${row.aptName}</td>
+    <td style="padding:4px 8px;border:1px solid #ddd;font-size:12px;font-weight:600;color:${row.isExtended ? '#9CA3AF' : '#1a1a2e'}${row.isExtended ? ';text-decoration:line-through' : ''}">${row.aptName}${row.isExtended ? ' <span style="text-decoration:none;background:#E5E7EB;color:#4B5563;font-size:9px;font-weight:700;padding:1px 7px;border-radius:9px;vertical-align:middle" title="Same guest checking out and back in the same day — no turnover needed">EXTENDED</span>' : ''}${(function(){const mi=(typeof window.aptMetroInfo==='function')?window.aptMetroInfo(_opsAptOf(row)):null;return (mi&&mi.station)?'<div style="font-size:10px;font-weight:400;color:#9CA3AF;text-decoration:none" title="Nearest metro station (drives the row order)">Ⓜ '+mi.station+'</div>':'';})()}</td>
     <td style="padding:4px 6px;border:1px solid #ddd;text-align:center">
       <button onclick="opsToggleLate(${i})"
         style="background:${lBg};border:${lBrd};border-radius:4px;padding:3px 8px;font-size:10px;font-weight:700;color:${lClr};cursor:pointer;white-space:nowrap;font-family:inherit">
@@ -6436,10 +6501,14 @@ function _opsBuildRow(row, i) {
         placeholder=""
         style="width:100%;box-sizing:border-box;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e">
     </td>
-    <td style="padding:4px 4px;border:1px solid #ddd;text-align:center;width:28px">
+    <td style="padding:4px 4px;border:1px solid #ddd;text-align:center;width:52px;white-space:nowrap">
+      <button onclick="opsToggleExtended(${i})"
+        title="${row.isExtended ? 'Marked extended (no turnover) — click to unmark' : 'Mark as extended stay (same guest, no turnover)'}"
+        style="background:${row.isExtended ? '#4B5563' : 'none'};border:${row.isExtended ? 'none' : '1px solid #E5E7EB'};border-radius:4px;cursor:pointer;color:${row.isExtended ? '#fff' : '#9CA3AF'};font-size:10px;font-weight:700;line-height:1;padding:3px 5px;vertical-align:middle"
+        onmouseover="if(!${row.isExtended})this.style.color='#4B5563'" onmouseout="if(!${row.isExtended})this.style.color='#9CA3AF'">⇄</button>
       <button onclick="opsRemoveRow(${i})"
         title="Remove from today's list"
-        style="background:none;border:none;cursor:pointer;color:#D1D5DB;font-size:18px;line-height:1;padding:0"
+        style="background:none;border:none;cursor:pointer;color:#D1D5DB;font-size:18px;line-height:1;padding:0;vertical-align:middle"
         onmouseover="this.style.color='#EF4444'" onmouseout="this.style.color='#D1D5DB'">×</button>
     </td>
   </tr>`;
@@ -6547,6 +6616,28 @@ function opsToggleCheckin(i) {
   _opsRows[i].checkinSameDay = cycle[_opsRows[i].checkinSameDay] || 'unknown';
   const tbody = document.getElementById('ops-tbody');
   if (tbody) { tbody.innerHTML = _opsRows.map((row,idx) => _opsBuildRow(row,idx)).join(''); }
+}
+
+// Manual override for the EXTENDED flag. Sets extendedManual (which wins over
+// auto-detection), re-sorts so extended rows sink to the bottom, saves.
+function opsToggleExtended(i) {
+  if (!_opsRows[i]) return;
+  const now = !_opsRows[i].isExtended;
+  _opsRows[i].isExtended = now;
+  _opsRows[i].extendedManual = now;
+  // if a row is un-flagged and it was a check-in booking, restore its checkin-only look
+  if (!now && !_opsRows[i].checkoutGuest && _opsRows[i].checkinSameDay === 'checkin_only') {
+    _opsRows[i].isCheckinOnly = true;
+  } else if (now) {
+    _opsRows[i].isCheckinOnly = false;
+  }
+  // re-sort: active first, extended at the bottom (stable)
+  const active = _opsRows.filter(r => !r.isExtended);
+  const ext = _opsRows.filter(r => r.isExtended);
+  _opsRows = [...active, ...ext];
+  const tbody = document.getElementById('ops-tbody');
+  if (tbody) { tbody.innerHTML = _opsRows.map((row,idx) => _opsBuildRow(row,idx)).join(''); }
+  if (typeof _opsAutoSave === 'function') _opsAutoSave();
 }
 
 function opsCompleteTask(id, done) {
@@ -7841,6 +7932,69 @@ loadFromDb()
     return { cat: 'attiki', how: 'default' };
   }
   function categoryOf(apt) { return categoryInfo(apt).cat; }
+
+  // ── Metro-station proximity ordering ────────────────────────────────────────
+  // Orders Attiki & Thessaloniki apartments by their NEAREST metro station,
+  // following the station sequence along the lines — so units near consecutive
+  // stops (Victoria → Attiki…) sit together. Coordinates are approximate (fine
+  // for nearest-station picking); edit freely. City Escapes have no metro.
+  const METRO_ROUTES = {
+    attiki: [
+      // Line 1 (green) Piraeus → Kifissia
+      {n:'Piraeus',lat:37.9480,lng:23.6430},{n:'Faliro',lat:37.9451,lng:23.6650},{n:'Moschato',lat:37.9550,lng:23.6800},
+      {n:'Kallithea',lat:37.9603,lng:23.6970},{n:'Tavros',lat:37.9625,lng:23.7035},{n:'Petralona',lat:37.9686,lng:23.7093},
+      {n:'Thissio',lat:37.9767,lng:23.7208},{n:'Monastiraki',lat:37.9761,lng:23.7256},{n:'Omonia',lat:37.9842,lng:23.7281},
+      {n:'Victoria',lat:37.9932,lng:23.7305},{n:'Attiki',lat:37.9994,lng:23.7226},{n:'Agios Nikolaos',lat:38.0069,lng:23.7276},
+      {n:'Kato Patissia',lat:38.0117,lng:23.7286},{n:'Agios Eleftherios',lat:38.0201,lng:23.7318},{n:'Ano Patissia',lat:38.0238,lng:23.7360},
+      {n:'Perissos',lat:38.0326,lng:23.7448},{n:'Pefkakia',lat:38.0370,lng:23.7500},{n:'Nea Ionia',lat:38.0410,lng:23.7550},
+      {n:'Iraklio',lat:38.0462,lng:23.7660},{n:'Irini',lat:38.0432,lng:23.7830},{n:'Neratziotissa',lat:38.0448,lng:23.7929},
+      {n:'Maroussi',lat:38.0561,lng:23.8050},{n:'KAT',lat:38.0660,lng:23.8040},{n:'Kifissia',lat:38.0736,lng:23.8080},
+      // Line 2 (red) Anthoupoli → Elliniko
+      {n:'Anthoupoli',lat:38.0170,lng:23.6910},{n:'Peristeri',lat:38.0130,lng:23.6960},{n:'Agios Antonios',lat:38.0066,lng:23.6996},
+      {n:'Sepolia',lat:38.0027,lng:23.7135},{n:'Larissa Station',lat:37.9920,lng:23.7210},{n:'Metaxourghio',lat:37.9860,lng:23.7210},
+      {n:'Panepistimio',lat:37.9800,lng:23.7330},{n:'Syntagma',lat:37.9755,lng:23.7349},{n:'Akropoli',lat:37.9686,lng:23.7295},
+      {n:'Syngrou-Fix',lat:37.9642,lng:23.7266},{n:'Neos Kosmos',lat:37.9573,lng:23.7286},{n:'Agios Ioannis',lat:37.9566,lng:23.7346},
+      {n:'Dafni',lat:37.9494,lng:23.7373},{n:'Agios Dimitrios',lat:37.9406,lng:23.7406},{n:'Ilioupoli',lat:37.9300,lng:23.7444},
+      {n:'Alimos',lat:37.9180,lng:23.7440},{n:'Argyroupoli',lat:37.9030,lng:23.7460},{n:'Elliniko',lat:37.8926,lng:23.7476},
+      // Line 3 (blue) Dimotiko Theatro → Doukissis Plakentias
+      {n:'Dimotiko Theatro',lat:37.9430,lng:23.6470},{n:'Maniatika',lat:37.9540,lng:23.6400},{n:'Nikaia',lat:37.9650,lng:23.6470},
+      {n:'Korydallos',lat:37.9770,lng:23.6520},{n:'Agia Varvara',lat:37.9850,lng:23.6590},{n:'Agia Marina',lat:37.9885,lng:23.6660},
+      {n:'Egaleo',lat:37.9920,lng:23.6820},{n:'Eleonas',lat:37.9880,lng:23.6940},{n:'Kerameikos',lat:37.9785,lng:23.7115},
+      {n:'Evangelismos',lat:37.9764,lng:23.7470},{n:'Megaro Mousikis',lat:37.9793,lng:23.7527},{n:'Ambelokipi',lat:37.9873,lng:23.7570},
+      {n:'Panormou',lat:37.9932,lng:23.7635},{n:'Katehaki',lat:37.9930,lng:23.7760},{n:'Ethniki Amyna',lat:38.0000,lng:23.7855},
+      {n:'Holargos',lat:38.0043,lng:23.7940},{n:'Nomismatokopio',lat:38.0095,lng:23.8050},{n:'Agia Paraskevi',lat:38.0170,lng:23.8120},
+      {n:'Chalandri',lat:38.0230,lng:23.7940},{n:'Doukissis Plakentias',lat:38.0240,lng:23.8330},
+    ],
+    thessaloniki: [
+      {n:'New Railway Station',lat:40.6440,lng:22.9290},{n:'Dimokratias',lat:40.6410,lng:22.9350},{n:'Venizelou',lat:40.6380,lng:22.9410},
+      {n:'Agia Sofia',lat:40.6340,lng:22.9460},{n:'Sintrivani',lat:40.6300,lng:22.9530},{n:'Panepistimio',lat:40.6280,lng:22.9590},
+      {n:'Papafi',lat:40.6230,lng:22.9640},{n:'Efkleidis',lat:40.6190,lng:22.9680},{n:'Fleming',lat:40.6150,lng:22.9700},
+      {n:'Analipsi',lat:40.6110,lng:22.9720},{n:'25 Martiou',lat:40.6060,lng:22.9740},{n:'Voulgari',lat:40.6010,lng:22.9760},
+      {n:'Nea Elvetia',lat:40.5960,lng:22.9790},
+    ],
+  };
+  // Nearest station (index along the route + distance) for an apartment.
+  window.aptMetroInfo = function (apt) {
+    if (!apt) return null;
+    const cat = categoryOf(apt);
+    const stations = METRO_ROUTES[cat];
+    const la = parseFloat(apt.lat), ln = parseFloat(apt.lng);
+    if (!stations || !isFinite(la) || !isFinite(ln)) return { cat, idx: null, station: null, dist: null };
+    let bi = 0, bd = Infinity;
+    stations.forEach((st, i) => { const d = _distKm(la, ln, st.lat, st.lng); if (d < bd) { bd = d; bi = i; } });
+    return { cat, idx: bi, station: stations[bi].n, dist: bd };
+  };
+  // Comparator: category order, then station sequence, then distance, then name.
+  window.aptProximityCompare = function (a, b) {
+    const rank = (x) => ({ attiki: 0, thessaloniki: 1, escape: 2 }[x] ?? 3);
+    const ia = window.aptMetroInfo(a) || {}, ib = window.aptMetroInfo(b) || {};
+    if (rank(ia.cat) !== rank(ib.cat)) return rank(ia.cat) - rank(ib.cat);
+    const xa = ia.idx == null ? 1e9 : ia.idx, xb = ib.idx == null ? 1e9 : ib.idx;
+    if (xa !== xb) return xa - xb;
+    const da = ia.dist == null ? 0 : ia.dist, db = ib.dist == null ? 0 : ib.dist;
+    if (da !== db) return da - db;
+    return String((a && a.name) || '').localeCompare(String((b && b.name) || ''));
+  };
   // Occupancy-mode is now ALL categories (unified alert system).
   function usesOccupancy(apt) { return true; }
   // Back-compat: isAttiki() means "uses the occupancy rule" for alert logic.
@@ -7870,7 +8024,7 @@ loadFromDb()
   };
 
   // ── Sort state (default: name A→Z) ──────────────────────────────────────────
-  let _sortKey = 'name';
+  let _sortKey = 'proximity';
   let _sortDir = 1; // 1 = asc, -1 = desc
 
   // ── Date helpers ───────────────────────────────────────────────────────────
@@ -8415,6 +8569,13 @@ loadFromDb()
     //  computed per-row above — no portfolio averaging needed.)
 
     // ── Sort: category groups first, then the chosen column within each ──
+    // Attach nearest-station info (for proximity order + the Ⓜ label).
+    rows.forEach(r => {
+      const mi = window.aptMetroInfo ? window.aptMetroInfo(r) : null;
+      r.nearestStation = mi && mi.station ? mi.station : null;
+      r._stIdx = mi && mi.idx != null ? mi.idx : 1e9;
+      r._stDist = mi && mi.dist != null ? mi.dist : 0;
+    });
     const dir = _sortDir;
     const catRank = (c) => { const i = CATEGORY_ORDER.indexOf(c); return i < 0 ? 99 : i; };
     rows.sort((a, b) => {
@@ -8422,6 +8583,11 @@ loadFromDb()
       const c = catRank(a.category) - catRank(b.category);
       if (c !== 0) return c;
       // secondary: the active sort column
+      if (_sortKey === 'proximity') {
+        if (a._stIdx !== b._stIdx) return a._stIdx - b._stIdx;
+        if (a._stDist !== b._stDist) return a._stDist - b._stDist;
+        return String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
+      }
       if (_sortKey === 'name') {
         return dir * String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
       }
@@ -8435,7 +8601,12 @@ loadFromDb()
 
   // Toggle sort when a header is clicked
   window.perfSort = function (key) {
-    if (_sortKey === key) _sortDir *= -1;
+    if (key === 'name') {
+      // cycle: proximity → name A-Z → name Z-A → proximity
+      if (_sortKey === 'proximity') { _sortKey = 'name'; _sortDir = 1; }
+      else if (_sortKey === 'name' && _sortDir === 1) { _sortDir = -1; }
+      else { _sortKey = 'proximity'; _sortDir = 1; }
+    } else if (_sortKey === key) _sortDir *= -1;
     else { _sortKey = key; _sortDir = (key === 'name') ? 1 : -1; }
     renderPerf();
   };
@@ -8636,7 +8807,7 @@ loadFromDb()
           <div style="overflow-x:auto">
             <table class="tbl">
               <thead><tr>
-                <th style="cursor:pointer;user-select:none" onclick="perfSort('name')">Property${sortArrow('name')}</th>
+                <th style="cursor:pointer;user-select:none" onclick="perfSort('name')" title="Default order: nearest metro station along the lines. Click to cycle A–Z / Z–A / proximity.">Property${_sortKey === 'proximity' ? ' <span style="font-size:9px;color:var(--tx3)">📍 metro</span>' : sortArrow('name')}</th>
                 <th title="Plain-language conclusion from all signals">Verdict</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ15')">Occ 15d${sortArrow('occ15')}</th>
                 <th class="r" style="cursor:pointer;user-select:none" onclick="perfSort('occ30')">Occ 30d${sortArrow('occ30')}</th>
@@ -8674,7 +8845,7 @@ loadFromDb()
                       : '';
                     html += `
                   <tr id="perf-row-${String(r.aptId||'').replace(/[^a-zA-Z0-9_-]/g,'')}" style="${rowBg}">
-                    <td style="font-weight:500">${r.isAttiki ? '<span title="city apartment (Attiki/Thessaloniki)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.categoryHow === 'default' ? ' <span title="No location data from Hosthub — defaulted to Attiki. Add it to a category list to override." style="font-size:10px;color:#8890a8;border:1px dashed #5a627a;border-radius:8px;padding:0 5px">uncategorized</span>' : ''}${r.alert && r.alert.level ? (r.ack ? ` <span onclick="perfUnmarkDoneIdx(${r._i})" title="Corrective action taken${r.ack.note ? ': ' + String(r.ack.note).replace(/"/g,'&quot;') : ''} — was ${alertLabel(r.alert)} · rechecks in ${perfAckLeftH(r.ack)}h · click to unmark" style="cursor:pointer;color:#3ecf8e;font-size:11px;font-weight:600">✓ ${perfAckLeftH(r.ack)}h</span>` : ` <span onclick="perfMarkDoneIdx(${r._i},'${r.alert.level}')" title="${alertLabel(r.alert)} — click to mark corrective action taken (hidden for 48h, then rechecked)" style="cursor:pointer;color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>`) : ''}${upBadge} <button onclick="perfCourseIdx(${r._i})" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button>${r.lastBookingDays != null ? `<div style="font-size:10px;color:var(--tx3);margin-top:1px" title="Days since the most recent reservation was made (any dates)">last booking ${r.lastBookingDays === 0 ? 'today' : r.lastBookingDays + 'd ago'}</div>` : ''}</td>
+                    <td style="font-weight:500">${r.isAttiki ? '<span title="city apartment (Attiki/Thessaloniki)" style="color:#C9A84C">◆</span> ' : ''}${r.name}${r.categoryHow === 'default' ? ' <span title="No location data from Hosthub — defaulted to Attiki. Add it to a category list to override." style="font-size:10px;color:#8890a8;border:1px dashed #5a627a;border-radius:8px;padding:0 5px">uncategorized</span>' : ''}${r.alert && r.alert.level ? (r.ack ? ` <span onclick="perfUnmarkDoneIdx(${r._i})" title="Corrective action taken${r.ack.note ? ': ' + String(r.ack.note).replace(/"/g,'&quot;') : ''} — was ${alertLabel(r.alert)} · rechecks in ${perfAckLeftH(r.ack)}h · click to unmark" style="cursor:pointer;color:#3ecf8e;font-size:11px;font-weight:600">✓ ${perfAckLeftH(r.ack)}h</span>` : ` <span onclick="perfMarkDoneIdx(${r._i},'${r.alert.level}')" title="${alertLabel(r.alert)} — click to mark corrective action taken (hidden for 48h, then rechecked)" style="cursor:pointer;color:${r.alert.level === 'red' ? '#c0392b' : '#d68910'};font-size:11px;font-weight:600">${alertBadge(r.alert)}</span>`) : ''}${upBadge} <button onclick="perfCourseIdx(${r._i})" title="3-month occupancy & ADR chart" style="background:none;border:none;cursor:pointer;color:#8890a8;font-size:13px;padding:0 2px;vertical-align:middle">📈</button>${r.lastBookingDays != null ? `<div style="font-size:10px;color:var(--tx3);margin-top:1px" title="Days since the most recent reservation was made (any dates)">last booking ${r.lastBookingDays === 0 ? 'today' : r.lastBookingDays + 'd ago'}</div>` : ''}${r.nearestStation ? `<div style="font-size:10px;color:var(--tx3);margin-top:1px" title="Nearest metro station (drives the default row order)">Ⓜ ${r.nearestStation}</div>` : ''}</td>
                     <td>${verdictBadge(r.verdict)}</td>
                     <td class="r">${occBar(r.occ15)}</td>
                     <td class="r">${occBar(r.occ30)}</td>
