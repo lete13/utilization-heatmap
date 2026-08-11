@@ -7066,7 +7066,33 @@ function renderOps() {
           <tbody id="ops-tbody">${rowsHtml}</tbody>
         </table>
 
-        <!-- Tasks inside printable -->
+        <!-- Cleaning list: real turnovers only (excludes extended/preparation/maintenance) -->
+        ${(function(){
+          const clean = _opsRows.filter(function(r){
+            return !r.isExtended && !r.isPreparation && !r.isMaintenance && !r.isCheckinOnly;
+          });
+          if(!clean.length) return '';
+          const body = clean.map(function(r){
+            const gi = _opsRows.indexOf(r);
+            const st = (typeof window.aptMetroInfo==='function') ? window.aptMetroInfo(_opsAptOf(r)) : null;
+            const stLabel = (st && st.station) ? '<span style="font-size:10px;color:#9CA3AF;font-weight:400"> · Ⓜ '+st.station+'</span>' : '';
+            return '<tr>'
+              +'<td style="padding:5px 10px;border:1px solid #E5E7EB;font-weight:600;color:#1a1a2e">'+(r.aptName||'')+stLabel+'</td>'
+              +'<td style="padding:3px 6px;border:1px solid #E5E7EB;width:200px">'
+                +'<input type="text" value="'+String(r.cleanerName||'').replace(/"/g,'&quot;')+'" placeholder="assign cleaner…" '
+                +'oninput="opsSetRow('+gi+',&#39;cleanerName&#39;,this.value);_opsAutoSave()" '
+                +'style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;padding:2px 4px"></td>'
+              +'</tr>';
+          }).join('');
+          return '<div style="margin-top:22px">'
+            +'<div style="font-size:14px;font-weight:700;color:#1a1a2e;margin-bottom:6px">🧽 Καθαρισμοί σήμερα <span style="font-size:11px;font-weight:400;color:#9CA3AF">('+clean.length+' προς καθαρισμό)</span></div>'
+            +'<table style="width:100%;max-width:520px;border-collapse:collapse;font-size:13px">'
+            +'<thead><tr style="background:#F3F4F6">'
+            +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Κατάλυμα</th>'
+            +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Καθαρίστρια</th>'
+            +'</tr></thead><tbody>'+body+'</tbody></table></div>';
+        })()}
+
         ${(function(){
           const pending = tasks.filter(function(t){return !t.completed;});
           if(!pending.length) return '';
