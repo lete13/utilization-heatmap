@@ -6392,7 +6392,7 @@ function _opsLoadData(date) {
   // its own date. If a snapshot was somehow stamped with a different date than
   // the one being loaded, drop those assignments so they never leak across days.
   if (snap.date && snap.date !== date) {
-    (snap.rows || []).forEach(r => { if (r) r.cleanerName = ''; });
+    (snap.rows || []).forEach(r => { if (r) { r.cleanerName = ''; r.cleanDone = false; } });
   }
 
   // Merge: start from snapshot rows, append any new bookings not yet in snapshot
@@ -7168,28 +7168,33 @@ function renderOps() {
             const st = (typeof window.aptMetroInfo==='function') ? window.aptMetroInfo(_opsAptOf(r)) : null;
             const stLabel = (st && st.station) ? '<span style="font-size:10px;color:#9CA3AF;font-weight:400"> · Ⓜ '+st.station+'</span>' : '';
             const cur = String(r.cleanerName||'');
+            const done = !!r.cleanDone;
             const opts = ['<option value="">— assign —</option>']
               .concat(clList.map(function(nm){
                 const esc = String(nm).replace(/"/g,'&quot;');
                 return '<option value="'+esc+'"'+(cur===nm?' selected':'')+'>'+esc+'</option>';
               }));
-            // if a saved name isn't in the list anymore, keep showing it
             if (cur && clList.indexOf(cur)===-1) opts.push('<option value="'+cur.replace(/"/g,'&quot;')+'" selected>'+cur+' (?)</option>');
-            return '<tr>'
-              +'<td style="padding:5px 10px;border:1px solid #E5E7EB;font-weight:600;color:#1a1a2e">'+(r.aptName||'')+stLabel+'</td>'
+            const nameStyle = done ? 'color:#9CA3AF;text-decoration:line-through' : 'color:#1a1a2e';
+            return '<tr'+(done?' style="background:#F0FDF4"':'')+'>'
+              +'<td style="padding:3px 6px;border:1px solid #E5E7EB;text-align:center;width:34px">'
+                +'<input type="checkbox" '+(done?'checked':'')+' onchange="opsSetRow('+gi+',&#39;cleanDone&#39;,this.checked);_opsAutoSave();renderOps()" title="Σημείωσε ως καθαρισμένο" style="width:16px;height:16px;cursor:pointer"></td>'
+              +'<td style="padding:5px 10px;border:1px solid #E5E7EB;font-weight:600;'+nameStyle+'">'+(r.aptName||'')+stLabel+'</td>'
               +'<td style="padding:3px 6px;border:1px solid #E5E7EB;width:200px">'
                 +'<select onchange="opsSetRow('+gi+',&#39;cleanerName&#39;,this.value);_opsAutoSave()" '
                 +'style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;padding:2px 4px;cursor:pointer">'
                 +opts.join('')+'</select></td>'
               +'</tr>';
           }).join('');
+          const doneCount = clean.filter(function(r){return r.cleanDone;}).length;
           return '<div style="margin-top:22px">'
             +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
-            +'<div style="font-size:14px;font-weight:700;color:#1a1a2e">🧽 Καθαρισμοί σήμερα <span style="font-size:11px;font-weight:400;color:#9CA3AF">('+clean.length+' προς καθαρισμό)</span></div>'
+            +'<div style="font-size:14px;font-weight:700;color:#1a1a2e">🧽 Καθαρισμοί σήμερα <span style="font-size:11px;font-weight:400;color:#9CA3AF">('+doneCount+'/'+clean.length+' έτοιμα)</span></div>'
             +'<button onclick="opsManageCleaners()" title="Add or remove cleaners" style="font-size:11px;padding:3px 10px;border:.5px solid var(--bdr2);border-radius:20px;background:var(--bg);cursor:pointer;color:var(--tx2)">👥 Καθαρίστριες</button>'
             +'</div>'
-            +'<table style="width:100%;max-width:520px;border-collapse:collapse;font-size:13px">'
+            +'<table style="width:100%;max-width:560px;border-collapse:collapse;font-size:13px">'
             +'<thead><tr style="background:#F3F4F6">'
+            +'<th style="padding:6px 6px;border:1px solid #E5E7EB;text-align:center;width:34px">✓</th>'
             +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Κατάλυμα</th>'
             +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Καθαρίστρια</th>'
             +'</tr></thead><tbody>'+body+'</tbody></table>'
