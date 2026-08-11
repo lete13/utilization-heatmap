@@ -6388,6 +6388,13 @@ function _opsLoadData(date) {
 
   if (!snap) return { rows: freshRows, notes: '', savedAt: null };
 
+  // Safety: a snapshot's per-apartment assignments (cleanerName) belong ONLY to
+  // its own date. If a snapshot was somehow stamped with a different date than
+  // the one being loaded, drop those assignments so they never leak across days.
+  if (snap.date && snap.date !== date) {
+    (snap.rows || []).forEach(r => { if (r) r.cleanerName = ''; });
+  }
+
   // Merge: start from snapshot rows, append any new bookings not yet in snapshot
   const snapAptIds = new Set(snap.rows.map(r => r.aptId||r.aptName));
   const newRows = freshRows.filter(r => !snapAptIds.has(r.aptId||r.aptName));
