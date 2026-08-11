@@ -6676,6 +6676,32 @@ function _refreshCleaningTable() {
   if (typeof renderOps === 'function') renderOps();
 }
 
+// Toggle the "cleaned" checkbox for a cleaning-list row. Updates state + saves,
+// and restyles the row in place (no full re-render, so the click isn't lost).
+function opsToggleCleanDone(gi, cb) {
+  if (!_opsRows[gi]) return;
+  const done = !!cb.checked;
+  _opsRows[gi].cleanDone = done;
+  if (typeof _opsAutoSave === 'function') _opsAutoSave();
+  // restyle this row
+  const tr = cb.closest('tr');
+  if (tr) {
+    tr.style.background = done ? '#F0FDF4' : '';
+    const nameTd = tr.children[1];
+    if (nameTd) {
+      nameTd.style.color = done ? '#9CA3AF' : '#1a1a2e';
+      nameTd.style.textDecoration = done ? 'line-through' : 'none';
+    }
+  }
+  // update the done counter in the heading
+  try {
+    const clean = _opsRows.filter(function(r){ return !r.isExtended && !r.isPreparation && !r.isMaintenance && !r.isCheckinOnly; });
+    const doneCount = clean.filter(function(r){ return r.cleanDone; }).length;
+    const lbl = document.getElementById('ops-clean-count');
+    if (lbl) lbl.textContent = '('+doneCount+'/'+clean.length+' έτοιμα)';
+  } catch(e){}
+}
+
 function opsToggleCleaned(i) {
   if (!_opsRows[i]) return;
   const r = _opsRows[i];
@@ -7178,7 +7204,7 @@ function renderOps() {
             const nameStyle = done ? 'color:#9CA3AF;text-decoration:line-through' : 'color:#1a1a2e';
             return '<tr'+(done?' style="background:#F0FDF4"':'')+'>'
               +'<td style="padding:3px 6px;border:1px solid #E5E7EB;text-align:center;width:34px">'
-                +'<input type="checkbox" '+(done?'checked':'')+' onchange="opsSetRow('+gi+',&#39;cleanDone&#39;,this.checked);_opsAutoSave();renderOps()" title="Σημείωσε ως καθαρισμένο" style="width:16px;height:16px;cursor:pointer"></td>'
+                +'<input type="checkbox" '+(done?'checked':'')+' onchange="opsToggleCleanDone('+gi+',this)" title="Σημείωσε ως καθαρισμένο" style="width:16px;height:16px;cursor:pointer"></td>'
               +'<td style="padding:5px 10px;border:1px solid #E5E7EB;font-weight:600;'+nameStyle+'">'+(r.aptName||'')+stLabel+'</td>'
               +'<td style="padding:3px 6px;border:1px solid #E5E7EB;width:200px">'
                 +'<select onchange="opsSetRow('+gi+',&#39;cleanerName&#39;,this.value);_opsAutoSave()" '
@@ -7189,7 +7215,7 @@ function renderOps() {
           const doneCount = clean.filter(function(r){return r.cleanDone;}).length;
           return '<div style="margin-top:22px">'
             +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
-            +'<div style="font-size:14px;font-weight:700;color:#1a1a2e">🧽 Καθαρισμοί σήμερα <span style="font-size:11px;font-weight:400;color:#9CA3AF">('+doneCount+'/'+clean.length+' έτοιμα)</span></div>'
+            +'<div style="font-size:14px;font-weight:700;color:#1a1a2e">🧽 Καθαρισμοί σήμερα <span id="ops-clean-count" style="font-size:11px;font-weight:400;color:#9CA3AF">('+doneCount+'/'+clean.length+' έτοιμα)</span></div>'
             +'<button onclick="opsManageCleaners()" title="Add or remove cleaners" style="font-size:11px;padding:3px 10px;border:.5px solid var(--bdr2);border-radius:20px;background:var(--bg);cursor:pointer;color:var(--tx2)">👥 Καθαρίστριες</button>'
             +'</div>'
             +'<table style="width:100%;max-width:560px;border-collapse:collapse;font-size:13px">'
