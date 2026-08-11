@@ -4,16 +4,18 @@
   "description": "Elysian Properties — Clearing Automation Tool",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev":   "node server.js"
+    "start": "node srv-boot.js",
+    "dev": "node srv-boot.js",
+    "test": "node tests/monthly-close-patches.test.js"
   },
   "engines": {
     "node": ">=18.0.0",
-    "npm":  ">=9.0.0"
+    "npm": ">=9.0.0"
   },
   "dependencies": {
-    "express":     "^4.18.2",
-    "node-fetch":  "^2.7.0",
-    "pg":          "^8.11.3"
+    "express": "^4.18.2",
+    "node-fetch": "^2.7.0",
+    "nodemailer": "^6.9.14",
+    "pg": "^8.11.3"
   }
 }
