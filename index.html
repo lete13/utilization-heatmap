@@ -6278,6 +6278,67 @@ function _opsEnsure() {
 }
 function _opsRowKey(aptId, date) { return aptId+'::'+date; }
 
+// Extra cleaning rows beyond normal turnovers: "refresh" and "sofa bed".
+//  refresh  = apartment's last checkout was ≥5 days ago (empty since) AND it has
+//             a check-in TOMORROW → needs a freshen-up before the arrival.
+//  sofa_bed = flagged elsewhere (plumbing ready; detection added later). Any
+//             booking checking in on `date` whose row carries needsSofaBed, or a
+//             booking name containing "sofa bed", surfaces here.
+function _opsExtraCleanRows(date, turnoverKeys) {
+  const out = [];
+  const seen = new Set(turnoverKeys || []);
+  const day = parseD(date); if (!day) return out;
+  const tomorrow = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+  const fmt = (dt) => dt.getDate()+'/'+(dt.getMonth()+1)+'/'+dt.getFullYear();
+  const tomorrowISO = tomorrow.toISOString().slice(0,10);
+  const tomorrowDMY = fmt(tomorrow);
+
+  // Group bookings by apartment for last-checkout lookup
+  (S.apts || []).forEach(apt => {
+    const key = apt.id || apt.name;
+    if (seen.has(key)) return;
+    // does this apartment have a check-in tomorrow?
+    const arr = (S.bks || []).find(b => (b.aptId===apt.id || b.aptName===apt.name) &&
+      (b.checkIn === tomorrowISO || b.checkIn === tomorrowDMY) && !b.cancelled);
+    if (!arr) return;
+    // last checkout on/before `date`
+    let lastCo = null;
+    (S.bks || []).forEach(b => {
+      if ((b.aptId===apt.id || b.aptName===apt.name) && b.checkOut && !b.cancelled) {
+        const co = parseD(b.checkOut);
+        if (co && co <= day && (!lastCo || co > lastCo)) lastCo = co;
+      }
+    });
+    if (lastCo) {
+      const gap = Math.round((day - lastCo) / 86400000);
+      if (gap >= 5) {
+        seen.add(key);
+        out.push({ aptId: apt.id||'', aptName: apt.name||'', cleanType:'refresh',
+          cleanerName:'', cleanDone:false, cleanTask:'', cleanTaskNote:'',
+          _gapDays: gap });
+      }
+    }
+  });
+
+  // Sofa-bed: any check-in today flagged needsSofaBed, or name contains "sofa bed".
+  (S.bks || []).forEach(b => {
+    if (b.cancelled) return;
+    const [_y,_m,_d] = date.split('-');
+    const dmy = parseInt(_d)+'/'+parseInt(_m)+'/'+_y;
+    const arrivesToday = (b.checkIn === date || b.checkIn === dmy);
+    if (!arrivesToday) return;
+    const wants = b.needsSofaBed || /\bsofa[\s-]?bed\b/i.test(String(b.guestName||''));
+    if (!wants) return;
+    const key = b.aptId || b.aptName;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ aptId: b.aptId||'', aptName: b.aptName||'', cleanType:'sofa_bed',
+      cleanerName:'', cleanDone:false, cleanTask:'prepare_sofa', cleanTaskNote:'' });
+  });
+
+  return out;
+}
+
 function _opsAutoRows(date) {
   const rows = []; const seen = new Set();
   // Bookings store dates as D/M/YYYY, _opsDate is YYYY-MM-DD — normalise for comparison
@@ -6697,6 +6758,14 @@ function opsSetCleanerKey(key, val) {
   const r = _opsFindRow(key);
   if (!r) return;
   r.cleanerName = val;
+  clearTimeout(_opsSaveTimer);
+  _opsSaveNow();
+}
+// Set an arbitrary cleaning field (cleanTask / cleanTaskNote) via stable key.
+function opsSetCleanFieldKey(key, field, val) {
+  const r = _opsFindRow(key);
+  if (!r) return;
+  r[field] = val;
   clearTimeout(_opsSaveTimer);
   _opsSaveNow();
 }
@@ -7219,49 +7288,79 @@ function renderOps() {
 
         <!-- Cleaning list: real turnovers only (excludes extended/preparation/maintenance) -->
         ${(function(){
-          let clean = _opsRows.filter(function(r){
+          let turnovers = _opsRows.filter(function(r){
             return !r.isExtended && !r.isPreparation && !r.isMaintenance && !r.isCheckinOnly;
+          }).map(function(r){ if(!r.cleanType) r.cleanType='turnover'; return r; });
+          // Append refresh / sofa-bed rows (persisted into _opsRows so they save)
+          const _turnKeys = turnovers.map(function(r){return r.aptId||r.aptName;});
+          const extras = (typeof _opsExtraCleanRows==='function') ? _opsExtraCleanRows(_opsDate, _turnKeys) : [];
+          extras.forEach(function(ex){
+            // reuse an existing row object if it's already in _opsRows (keeps edits)
+            let existing = _opsRows.find(function(r){ return (r.aptId||r.aptName)===(ex.aptId||ex.aptName) && r.cleanType===ex.cleanType; });
+            if(!existing){ _opsRows.push(ex); existing = ex; }
+            turnovers.push(existing);
           });
+          let clean = turnovers;
           if(!clean.length) return '';
-          // Done rows sink to the bottom (stable within each group).
-          const _notDone = clean.filter(function(r){return !r.cleanDone;});
-          const _done = clean.filter(function(r){return r.cleanDone;});
-          clean = _notDone.concat(_done);
+          // Group order: turnover → refresh → sofa_bed; done sinks within all.
+          const typeRank = { turnover:0, refresh:1, sofa_bed:2 };
+          clean = clean.slice().sort(function(a,b){
+            const da=a.cleanDone?1:0, db=b.cleanDone?1:0;
+            if(da!==db) return da-db;                       // not-done first
+            const ta=typeRank[a.cleanType]??9, tb=typeRank[b.cleanType]??9;
+            if(ta!==tb) return ta-tb;                       // then by type
+            return String(a.aptName).localeCompare(String(b.aptName));
+          });
           const clList = Array.isArray(S.cleaners) ? S.cleaners : [];
+          const TASKS = [['','—'],['genikos','Γενικός καθαρισμός'],['prepare_sofa','Prepare sofa bed'],['episkeui','Επισκευή βλάβης'],['extra','Extra']];
+          const typeBadge = function(t){
+            if(t==='refresh') return '<span style="background:#DBEAFE;color:#1E40AF;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:5px">REFRESH</span>';
+            if(t==='sofa_bed') return '<span style="background:#FEF3C7;color:#92400E;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:5px">SOFA BED</span>';
+            return '';
+          };
+          let lastType = null;
           const body = clean.map(function(r){
             const key = String(r.aptId||r.aptName||'').replace(/"/g,'&quot;');
-            const st = (typeof window.aptMetroInfo==='function') ? window.aptMetroInfo(_opsAptOf(r)) : null;
-            const stLabel = (st && st.station) ? '<span style="font-size:10px;color:#9CA3AF;font-weight:400"> · Ⓜ '+st.station+'</span>' : '';
+            const stM = (typeof window.aptMetroInfo==='function') ? window.aptMetroInfo(_opsAptOf(r)) : null;
+            const stLabel = (stM && stM.station) ? '<span style="font-size:10px;color:#9CA3AF;font-weight:400"> · Ⓜ '+stM.station+'</span>' : '';
             const cur = String(r.cleanerName||'');
             const done = !!r.cleanDone;
             const opts = ['<option value="">— assign —</option>']
-              .concat(clList.map(function(nm){
-                const esc = String(nm).replace(/"/g,'&quot;');
-                return '<option value="'+esc+'"'+(cur===nm?' selected':'')+'>'+esc+'</option>';
-              }));
+              .concat(clList.map(function(nm){ const esc=String(nm).replace(/"/g,'&quot;'); return '<option value="'+esc+'"'+(cur===nm?' selected':'')+'>'+esc+'</option>'; }));
             if (cur && clList.indexOf(cur)===-1) opts.push('<option value="'+cur.replace(/"/g,'&quot;')+'" selected>'+cur+' (?)</option>');
+            const curTask = String(r.cleanTask||'');
+            const taskOpts = TASKS.map(function(t){ return '<option value="'+t[0]+'"'+(curTask===t[0]?' selected':'')+'>'+t[1]+'</option>'; }).join('');
             const nameStyle = done ? 'color:#9CA3AF;text-decoration:line-through' : 'color:#1a1a2e';
+            // group separator label when the type changes (only among not-done)
+            let sep = '';
+            if (!done && r.cleanType !== lastType && (r.cleanType==='refresh'||r.cleanType==='sofa_bed')) {
+              lastType = r.cleanType;
+            }
             return '<tr'+(done?' style="background:#F0FDF4"':'')+'>'
               +'<td style="padding:3px 6px;border:1px solid #E5E7EB;text-align:center;width:34px">'
                 +'<input type="checkbox" '+(done?'checked':'')+' onchange="opsToggleCleanDoneKey(&#39;'+key+'&#39;,this.checked)" title="Σημείωσε ως καθαρισμένο" style="width:16px;height:16px;cursor:pointer"></td>'
-              +'<td style="padding:5px 10px;border:1px solid #E5E7EB;font-weight:600;'+nameStyle+'">'+(r.aptName||'')+stLabel+'</td>'
-              +'<td style="padding:3px 6px;border:1px solid #E5E7EB;width:200px">'
-                +'<select onchange="opsSetCleanerKey(&#39;'+key+'&#39;,this.value)" '
-                +'style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;padding:2px 4px;cursor:pointer">'
-                +opts.join('')+'</select></td>'
+              +'<td style="padding:5px 10px;border:1px solid #E5E7EB;font-weight:600;'+nameStyle+'">'+(r.aptName||'')+typeBadge(r.cleanType)+stLabel+'</td>'
+              +'<td style="padding:3px 6px;border:1px solid #E5E7EB;width:170px">'
+                +'<select onchange="opsSetCleanerKey(&#39;'+key+'&#39;,this.value)" style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;padding:2px 4px;cursor:pointer">'+opts.join('')+'</select></td>'
+              +'<td style="padding:3px 6px;border:1px solid #E5E7EB;width:160px">'
+                +'<select onchange="opsSetCleanFieldKey(&#39;'+key+'&#39;,&#39;cleanTask&#39;,this.value)" style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;padding:2px 4px;cursor:pointer">'+taskOpts+'</select></td>'
+              +'<td style="padding:3px 6px;border:1px solid #E5E7EB;width:170px">'
+                +'<input type="text" value="'+String(r.cleanTaskNote||'').replace(/"/g,'&quot;')+'" placeholder="σημείωση…" onchange="opsSetCleanFieldKey(&#39;'+key+'&#39;,&#39;cleanTaskNote&#39;,this.value)" style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;padding:2px 4px"></td>'
               +'</tr>';
           }).join('');
-          const doneCount = _done.length;
+          const doneCount = clean.filter(function(r){return r.cleanDone;}).length;
           return '<div style="margin-top:22px">'
             +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
             +'<div style="font-size:14px;font-weight:700;color:#1a1a2e">🧽 Καθαρισμοί σήμερα <span id="ops-clean-count" style="font-size:11px;font-weight:400;color:#9CA3AF">('+doneCount+'/'+clean.length+' έτοιμα)</span></div>'
             +'<button onclick="opsManageCleaners()" title="Add or remove cleaners" style="font-size:11px;padding:3px 10px;border:.5px solid var(--bdr2);border-radius:20px;background:var(--bg);cursor:pointer;color:var(--tx2)">👥 Καθαρίστριες</button>'
             +'</div>'
-            +'<table style="width:100%;max-width:560px;border-collapse:collapse;font-size:13px">'
+            +'<table style="width:100%;max-width:760px;border-collapse:collapse;font-size:13px">'
             +'<thead><tr style="background:#F3F4F6">'
             +'<th style="padding:6px 6px;border:1px solid #E5E7EB;text-align:center;width:34px">✓</th>'
             +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Κατάλυμα</th>'
             +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Καθαρίστρια</th>'
+            +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Εργασία</th>'
+            +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Σημείωση</th>'
             +'</tr></thead><tbody>'+body+'</tbody></table>'
             + (function(){
                 // Four fixed daily blocks — each row assigns a person from the
