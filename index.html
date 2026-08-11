@@ -6279,39 +6279,34 @@ function _opsEnsure() {
 function _opsRowKey(aptId, date) { return aptId+'::'+date; }
 
 // Extra cleaning rows beyond normal turnovers: "refresh" and "sofa bed".
-//  refresh  = apartment's last checkout was ≥5 days ago (empty since) AND it has
-//             a check-in TOMORROW → needs a freshen-up before the arrival.
-//  sofa_bed = flagged elsewhere (plumbing ready; detection added later). Any
-//             booking checking in on `date` whose row carries needsSofaBed, or a
-//             booking name containing "sofa bed", surfaces here.
+//  refresh  = apartment checking in TODAY whose last checkout was ≥4 days ago
+//             (empty since) → needs a freshen-up before today's arrival.
+//  sofa_bed = flagged elsewhere (plumbing ready; detection added later).
 function _opsExtraCleanRows(date, turnoverKeys) {
   const out = [];
   const seen = new Set(turnoverKeys || []);
   const day = parseD(date); if (!day) return out;
-  const tomorrow = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
-  const fmt = (dt) => dt.getDate()+'/'+(dt.getMonth()+1)+'/'+dt.getFullYear();
-  const tomorrowISO = tomorrow.toISOString().slice(0,10);
-  const tomorrowDMY = fmt(tomorrow);
+  const [_y,_m,_d] = date.split('-');
+  const todayDMY = parseInt(_d)+'/'+parseInt(_m)+'/'+_y;
 
-  // Group bookings by apartment for last-checkout lookup
   (S.apts || []).forEach(apt => {
     const key = apt.id || apt.name;
     if (seen.has(key)) return;
-    // does this apartment have a check-in tomorrow?
+    // does this apartment have a check-in TODAY?
     const arr = (S.bks || []).find(b => (b.aptId===apt.id || b.aptName===apt.name) &&
-      (b.checkIn === tomorrowISO || b.checkIn === tomorrowDMY) && !b.cancelled);
+      (b.checkIn === date || b.checkIn === todayDMY) && !b.cancelled);
     if (!arr) return;
-    // last checkout on/before `date`
+    // last checkout strictly before today
     let lastCo = null;
     (S.bks || []).forEach(b => {
       if ((b.aptId===apt.id || b.aptName===apt.name) && b.checkOut && !b.cancelled) {
         const co = parseD(b.checkOut);
-        if (co && co <= day && (!lastCo || co > lastCo)) lastCo = co;
+        if (co && co < day && (!lastCo || co > lastCo)) lastCo = co;
       }
     });
     if (lastCo) {
       const gap = Math.round((day - lastCo) / 86400000);
-      if (gap >= 5) {
+      if (gap >= 4) {
         seen.add(key);
         out.push({ aptId: apt.id||'', aptName: apt.name||'', cleanType:'refresh',
           cleanerName:'', cleanDone:false, cleanTask:'', cleanTaskNote:'',
@@ -6323,9 +6318,7 @@ function _opsExtraCleanRows(date, turnoverKeys) {
   // Sofa-bed: any check-in today flagged needsSofaBed, or name contains "sofa bed".
   (S.bks || []).forEach(b => {
     if (b.cancelled) return;
-    const [_y,_m,_d] = date.split('-');
-    const dmy = parseInt(_d)+'/'+parseInt(_m)+'/'+_y;
-    const arrivesToday = (b.checkIn === date || b.checkIn === dmy);
+    const arrivesToday = (b.checkIn === date || b.checkIn === todayDMY);
     if (!arrivesToday) return;
     const wants = b.needsSofaBed || /\bsofa[\s-]?bed\b/i.test(String(b.guestName||''));
     if (!wants) return;
