@@ -115,6 +115,54 @@
     .ss-opt.sel{font-weight:500;color:#0F1E2E}
     .ss-sep{padding:4px 12px;font-size:10px;font-weight:600;color:var(--tx3);text-transform:uppercase;letter-spacing:.05em;background:var(--bg3);border-top:.5px solid var(--bdr)}
     .ss-none{padding:10px 12px;font-size:12px;color:var(--tx3);font-style:italic}
+
+    /* ── Daily Ops — Flup template format (original colours, visual only) ── */
+    #tab-ops{ background:var(--bg3); padding:6px 4px 40px; }
+    /* Tables with a header become airy white "cards" */
+    #tab-ops table:has(thead){
+      background:var(--bg) !important;
+      border-collapse:separate !important;
+      border-spacing:0 !important;
+      border-radius:14px !important;
+      box-shadow:0 1px 2px rgba(60,50,30,.05), 0 4px 18px rgba(60,50,30,.06) !important;
+      overflow:hidden;
+      margin-bottom:18px;
+    }
+    /* Light, uppercase, borderless header */
+    #tab-ops table:has(thead) thead th,
+    #tab-ops table:has(thead) thead td{
+      background:var(--bg2) !important;
+      color:var(--tx3) !important;
+      font-weight:600 !important;
+      font-size:11px !important;
+      letter-spacing:.03em;
+      text-transform:uppercase;
+      border:none !important;
+      border-bottom:1px solid rgba(0,0,0,.07) !important;
+      padding:10px 14px !important;
+    }
+    /* Body cells: hairline separators only, more breathing room */
+    #tab-ops table:has(thead) tbody td,
+    #tab-ops table:has(thead) tbody th{
+      border:none !important;
+      border-bottom:1px solid rgba(0,0,0,.055) !important;
+      padding:11px 14px !important;
+    }
+    #tab-ops table:has(thead) tbody tr:last-child td{ border-bottom:none !important; }
+    /* Buttons: soft Flup pill shape (keep their colours) */
+    #tab-ops button:not(.nav-btn){
+      border-radius:10px !important;
+      font-family:var(--sans) !important;
+      transition:all .14s;
+    }
+    /* Selects & text inputs: rounded, soft surface */
+    #tab-ops select,
+    #tab-ops input[type="text"]{
+      border-radius:8px;
+    }
+    /* Daily blocks: wrap the four assignment blocks on a soft surface */
+    #tab-ops table:not(:has(thead)){ border-collapse:separate; border-spacing:0; }
+    #tab-ops table:not(:has(thead)) td{ border:none !important; padding:5px 6px !important; }
   </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -142,6 +190,7 @@
     <button class="nav-btn" data-tab="ops" onclick="showTab('ops',this)" id="nav-ops">🗓 Daily Ops</button>
     <button class="nav-btn" data-tab="perf" onclick="showTab('perf',this)" id="nav-perf">📊 Performance</button>
     <button class="nav-btn" data-tab="pinfo" onclick="showTab('pinfo',this)" id="nav-pinfo">🏷 Property Info</button>
+    <button class="nav-btn" data-tab="emp" onclick="showTab('emp',this)" id="nav-emp">👥 Employees</button>
     <div class="nav-dd" id="nav-dd">
       <button class="nav-btn" id="nav-tools" onclick="navDdToggle(event)">🧰 Tools<span class="nav-dd-caret">▼</span></button>
       <div class="nav-dd-menu">
@@ -612,6 +661,7 @@
 <div id="tab-rev" class="tab-panel" style="background:var(--bg)"></div>
 
 <div id="tab-perf" class="tab-panel" style="background:var(--bg)"></div>
+<div id="tab-emp" class="tab-panel" style="background:var(--bg)"></div>
 
 <div id="tab-co" class="tab-panel" style="background:var(--bg)"></div>
 
@@ -861,7 +911,8 @@ async function saveToDb() {
       monthlyClose: S.monthlyClose || {},
       ownerRemit: S.ownerRemit || {},
       payChk: S.payChk || {marks:{},cfg:{}},
-      cleaners: S.cleaners || []
+      cleaners: S.cleaners || [],
+      cleanerRoles: S.cleanerRoles || {}
     };
     const r = await fetch('/api/db/data', {
       method: 'POST',
@@ -900,7 +951,7 @@ async function loadFromDb() {
     S.bks     = data.bks     || S.bks;
     S.exps    = data.exps    || S.exps;
     S.meta    = data.meta    || S.meta    || {};
-    S.revenue = data.revenue || S.revenue || {cleaning:{},mgmt:{}};S.daily = data.daily || S.daily || {snapshots:{},tasks:[]};S.cleanOverride = data.cleanOverride || S.cleanOverride || {};S.rptLocks = data.rptLocks || S.rptLocks || {};S.moOverride = data.moOverride || S.moOverride || {};S.monthlyTasks = data.monthlyTasks || S.monthlyTasks || {};S.monthlyTaskDefs = data.monthlyTaskDefs || S.monthlyTaskDefs || [];S.monthlyClose = data.monthlyClose || S.monthlyClose || {};S.ownerRemit = data.ownerRemit || S.ownerRemit || {};S.payChk = data.payChk || S.payChk || {marks:{},cfg:{}};S.cleaners = data.cleaners || S.cleaners || [];
+    S.revenue = data.revenue || S.revenue || {cleaning:{},mgmt:{}};S.daily = data.daily || S.daily || {snapshots:{},tasks:[]};S.cleanOverride = data.cleanOverride || S.cleanOverride || {};S.rptLocks = data.rptLocks || S.rptLocks || {};S.moOverride = data.moOverride || S.moOverride || {};S.monthlyTasks = data.monthlyTasks || S.monthlyTasks || {};S.monthlyTaskDefs = data.monthlyTaskDefs || S.monthlyTaskDefs || [];S.monthlyClose = data.monthlyClose || S.monthlyClose || {};S.ownerRemit = data.ownerRemit || S.ownerRemit || {};S.payChk = data.payChk || S.payChk || {marks:{},cfg:{}};S.cleaners = data.cleaners || S.cleaners || [];S.cleanerRoles = data.cleanerRoles || S.cleanerRoles || {};
     _lastDbSave = data._savedAt;
     _dataInitialized = true;
     // Persist loaded state to localStorage
@@ -2646,6 +2697,7 @@ function showTab(name,btn){
     else if(name==='rev'){renderRevenue();}
     else if(name==='ops'){if(!_opsDate)_opsDate=_opsTodayStr();renderOps();}
     else if(name==='pinfo'){renderPropInfo();}
+    else if(name==='emp'){renderEmployees();}
     else if(name==='log'){renderLog();}
   });
 }
@@ -6044,7 +6096,7 @@ function importSessionFile(input){
       const d=JSON.parse(e.target.result);
       if(!d.apts&&!d.bks){toast('Not a valid session file.','err');return;}
       if(!confirm('Replace your current data with this session? ('+(d.bks?.length||0)+' bookings, '+(d.apts?.length||0)+' properties)'))return;
-      S.apts=d.apts||[];S.bks=d.bks||[];S.exps=d.exps||[];S.meta=d.meta||{};S.cleaners=d.cleaners||S.cleaners||[];
+      S.apts=d.apts||[];S.bks=d.bks||[];S.exps=d.exps||[];S.meta=d.meta||{};S.cleaners=d.cleaners||S.cleaners||[];S.cleanerRoles=d.cleanerRoles||S.cleanerRoles||{};
       applyDefaults();save();
       renderDash();renderCfg();renderBk();renderExp();
       toast('Session loaded — '+(S.bks.length)+' bookings, '+(S.apts.length)+' properties.','ok');
@@ -6078,7 +6130,7 @@ async function pullSession(){
     if(!r.ok)throw new Error('Server returned '+r.status);
     const d=await r.json();
     if(!confirm('Replace your current data with the shared session? ('+(d.bks?.length||0)+' bookings, '+(d.apts?.length||0)+' properties)'))return;
-    S.apts=d.apts||[];S.bks=d.bks||[];S.exps=d.exps||[];S.meta=d.meta||{};S.cleaners=d.cleaners||S.cleaners||[];
+    S.apts=d.apts||[];S.bks=d.bks||[];S.exps=d.exps||[];S.meta=d.meta||{};S.cleaners=d.cleaners||S.cleaners||[];S.cleanerRoles=d.cleanerRoles||S.cleanerRoles||{};
     applyDefaults();save();
     renderDash();renderCfg();renderBk();renderExp();
     toast('Session pulled — '+(S.bks.length)+' bookings.','ok');
@@ -6684,15 +6736,22 @@ function _renderCleanerModal() {
   const modal = document.getElementById('cleaner-modal');
   if (!modal) return;
   const list = Array.isArray(S.cleaners) ? S.cleaners : (S.cleaners = []);
+  if (!S.cleanerRoles) S.cleanerRoles = {};
+  const ROLES = [['','—'],['operator','Operator'],['cleaner','Cleaner'],['transporter','Transporter']];
   const rows = list.length
-    ? list.map((nm, idx) => `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f3">
+    ? list.map((nm, idx) => {
+        const role = (S.cleanerRoles && S.cleanerRoles[nm]) || '';
+        const roleOpts = ROLES.map(r=>'<option value="'+r[0]+'"'+(role===r[0]?' selected':'')+'>'+r[1]+'</option>').join('');
+        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f0f0f3">
         <span style="flex:1;font-size:13px;color:#1a1a2e">${String(nm).replace(/</g,'&lt;')}</span>
+        <select onchange="opsSetCleanerRole('${String(nm).replace(/'/g,"\\'")}',this.value)" style="font-size:12px;padding:3px 6px;border:1px solid #e0e0e6;border-radius:6px;cursor:pointer;color:#4b5563">${roleOpts}</select>
         <button onclick="opsDeleteCleaner(${idx})" title="Delete" style="background:none;border:none;color:#c0392b;cursor:pointer;font-size:16px;padding:2px 6px">×</button>
-      </div>`).join('')
+      </div>`;
+      }).join('')
     : '<div style="color:#9CA3AF;font-size:12px;padding:8px 0">No cleaners yet — add one below.</div>';
-  modal.innerHTML = `<div style="background:#fff;border-radius:12px;padding:20px 22px;width:340px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.25)" onclick="event.stopPropagation()">
+  modal.innerHTML = `<div style="background:#fff;border-radius:12px;padding:20px 22px;width:400px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.25)" onclick="event.stopPropagation()">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div style="font-size:15px;font-weight:700;color:#1a1a2e">👥 Καθαρίστριες</div>
+      <div style="font-size:15px;font-weight:700;color:#1a1a2e">👥 Cleaners</div>
       <button onclick="document.getElementById('cleaner-modal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9CA3AF;line-height:1">×</button>
     </div>
     <div style="max-height:300px;overflow:auto;margin-bottom:12px">${rows}</div>
@@ -6724,6 +6783,14 @@ function opsDeleteCleaner(idx) {
   if (typeof saveToDb === 'function') saveToDb();
   _refreshCleaningTable();
 }
+// Set an employee's specialty/role (operator / cleaner / transporter).
+function opsSetCleanerRole(name, role) {
+  if (!S.cleanerRoles) S.cleanerRoles = {};
+  if (role) S.cleanerRoles[name] = role; else delete S.cleanerRoles[name];
+  if (typeof saveToDb === 'function') saveToDb();
+  // refresh employees board if it's open
+  if (typeof renderEmployees === 'function' && document.getElementById('tab-emp') && document.getElementById('tab-emp').innerHTML) renderEmployees();
+}
 // Re-render the ops tab so the cleaning-table dropdowns pick up the new list.
 // The cleaner modal lives on <body>, so it survives this re-render.
 function _refreshCleaningTable() {
@@ -6736,6 +6803,47 @@ function _refreshCleaningTable() {
 function _opsFindRow(key) {
   return _opsRows.find(function(r){ return String(r.aptId||r.aptName) === String(key); });
 }
+// Toggle cleaning-table sort between status-grouped and by-cleaner route order.
+function opsToggleCleanSort() {
+  window._opsCleanSort = (window._opsCleanSort === 'route') ? 'status' : 'route';
+  if (typeof renderOps === 'function') renderOps();
+}
+// Build a plain-text cleaning list for today and copy it to the clipboard,
+// so it can be pasted into WhatsApp/Viber for the team.
+function opsCopyCleanList() {
+  const TASK_LABELS = { genikos:'General clean', prepare_sofa:'Sofa bed', episkeui:'Repair', extra:'Extra' };
+  const clean = (_opsRows||[]).filter(function(r){ return !r.isExtended && !r.isPreparation && !r.isMaintenance && !r.isCheckinOnly; });
+  if (!clean.length) { if(typeof toast==='function') toast('Καμία καθαριότητα σήμερα','info'); return; }
+  // group by cleaner (route order within), unassigned last
+  const byCleaner = {};
+  clean.forEach(function(r){ const c=r.cleanerName||'—'; (byCleaner[c]=byCleaner[c]||[]).push(r); });
+  const cleaners = Object.keys(byCleaner).sort(function(a,b){ if(a==='—')return 1; if(b==='—')return -1; return a.localeCompare(b); });
+  const dstr = (typeof _opsFmtDate==='function') ? _opsFmtDate(_opsDate) : _opsDate;
+  let lines = ['🧽 ΚΑΘΑΡΙΣΜΟΙ — '+dstr, ''];
+  cleaners.forEach(function(c){
+    let list = byCleaner[c].slice();
+    if(typeof window.aptProximityCompare==='function') list.sort(function(a,b){return window.aptProximityCompare(_opsAptOf(a),_opsAptOf(b));});
+    lines.push((c==='—'?'— Χωρίς ανάθεση —':'👤 '+c)+':');
+    list.forEach(function(r){
+      const t = r.cleanTask ? ' ['+(TASK_LABELS[r.cleanTask]||r.cleanTask)+']' : '';
+      const badge = r.cleanType==='refresh' ? ' (REFRESH)' : r.cleanType==='sofa_bed' ? ' (SOFA BED)' : '';
+      const note = r.cleanTaskNote ? ' — '+r.cleanTaskNote : '';
+      const chk = r.cleanDone ? '✓ ' : '• ';
+      lines.push('   '+chk+r.aptName+badge+t+note);
+    });
+    lines.push('');
+  });
+  const text = lines.join('\n').trim();
+  const done = function(){ if(typeof toast==='function') toast('Η λίστα αντιγράφηκε ✓','success'); };
+  const fail = function(){
+    // fallback: show a prompt to copy manually
+    try { window.prompt('Copy list (Ctrl/Cmd+C):', text); } catch(e){}
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(fail);
+  } else { fail(); }
+}
+
 // Toggle cleaned via stable key; save synchronously, THEN re-render so the row
 // moves to the bottom with the fresh state (avoids reload of stale snapshot).
 function opsToggleCleanDoneKey(key, checked) {
@@ -6753,6 +6861,15 @@ function opsSetCleanerKey(key, val) {
   r.cleanerName = val;
   clearTimeout(_opsSaveTimer);
   _opsSaveNow();
+}
+// One-click: toggle a cleaning row's assignment to "External crew" (and back).
+function opsAssignExternalKey(key) {
+  const r = _opsFindRow(key);
+  if (!r) return;
+  r.cleanerName = (r.cleanerName === 'External crew') ? '' : 'External crew';
+  clearTimeout(_opsSaveTimer);
+  _opsSaveNow();
+  if (typeof renderOps === 'function') renderOps();
 }
 // Set an arbitrary cleaning field (cleanTask / cleanTaskNote) via stable key.
 function opsSetCleanFieldKey(key, field, val) {
@@ -6783,7 +6900,7 @@ function opsToggleCleanDone(gi, cb) {
     const clean = _opsRows.filter(function(r){ return !r.isExtended && !r.isPreparation && !r.isMaintenance && !r.isCheckinOnly; });
     const doneCount = clean.filter(function(r){ return r.cleanDone; }).length;
     const lbl = document.getElementById('ops-clean-count');
-    if (lbl) lbl.textContent = '('+doneCount+'/'+clean.length+' έτοιμα)';
+    if (lbl) lbl.textContent = '('+doneCount+'/'+clean.length+' done)';
   } catch(e){}
 }
 
@@ -7066,7 +7183,7 @@ function _opsSchedHtml() {
     out += `<div style="font-weight:700;color:#EF4444;margin-bottom:6px">⚠ Λείπουν ${m.length} checkout από το πρόγραμμα:</div>` +
       m.map(x => `<div style="padding:2px 0">• <b>${esc(x.name)}</b>${x.sameDay ? ' <span style="color:#EF4444;font-weight:700">⚡ same-day check-in</span>' : ''}</div>`).join('');
   }
-  if (ex.length) out += `<div style="margin-top:8px;color:var(--tx3)">Στο πρόγραμμα χωρίς checkout σήμερα (ΟΚ αν είναι πλυντήρια / μεταφορές / προετοιμασίες): ${ex.map(esc).join(' · ')}</div>`;
+  if (ex.length) out += `<div style="margin-top:8px;color:var(--tx3)">Scheduled with no checkout today (OK if laundry / transfers / preparations): ${ex.map(esc).join(' · ')}</div>`;
   if (_opsSched.note) out += `<div style="margin-top:6px;color:var(--tx3)">${esc(_opsSched.note)}</div>`;
   return wrap(m.length ? '#EF4444' : '#16A34A', out);
 }
@@ -7174,6 +7291,254 @@ async function opsScheduleCheck(file) {
   });
 })();
 
+// ── Employees board ─────────────────────────────────────────────────────────
+// Roster = S.cleaners. Per person: assigned today?, Ρεπό days this week,
+// Άδειες (paid leave) used this year out of 22.
+const EMP_LEAVE_TOTAL = 22;
+function _empParseISO(s){ const d=parseD(s); return d; }
+function _empWeekBounds(iso){
+  // Monday–Sunday week containing the given date.
+  const d = parseD(iso) || new Date();
+  const dow = (d.getDay()+6)%7; // 0=Mon
+  const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate()-dow);
+  const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate()+6);
+  return { mon, sun };
+}
+function _empCollectBlock(dateKey, block){
+  // returns array of person names in a block on a given date
+  const ex = (S.daily && S.daily.extra && S.daily.extra[dateKey]) || {};
+  const b = ex[block] || {};
+  return Object.keys(b).map(k=>b[k]).filter(Boolean);
+}
+function renderEmployees(){
+  const panel = document.getElementById('tab-emp');
+  if (!panel) return;
+  _opsEnsure && _opsEnsure();
+  const roster = Array.isArray(S.cleaners) ? S.cleaners.slice() : [];
+  const today = (typeof _opsTodayStr==='function') ? _opsTodayStr() : new Date().toISOString().slice(0,10);
+  const year = (parseD(today) || new Date()).getFullYear();
+  const { mon, sun } = _empWeekBounds(today);
+  const extra = (S.daily && S.daily.extra) || {};
+
+  // ---- assigned today: cleaning table (snapshot cleanerName) + all blocks ----
+  const assignedToday = new Set();
+  const snap = (S.daily && S.daily.snapshots && S.daily.snapshots[today]) || null;
+  if (snap && Array.isArray(snap.rows)) snap.rows.forEach(r=>{ if(r.cleanerName) assignedToday.add(r.cleanerName); });
+  ['repo','adeies','odigoi','imatismos_cholargos','imatismos_thess'].forEach(bl=>{
+    // note: repo/adeies mean OFF, not "task assigned" — only odigoi/imatismos + cleaning count as tasks
+  });
+  ['odigoi','imatismos_cholargos','imatismos_thess'].forEach(bl=>{
+    _empCollectBlock(today, bl).forEach(n=>assignedToday.add(n));
+  });
+  const repoToday = new Set(_empCollectBlock(today,'repo'));
+  const leaveToday = new Set(_empCollectBlock(today,'adeies'));
+  const offToday = new Set([...repoToday, ...leaveToday]);
+
+  // ---- Today's cleaning workload per person (# apartments) ----
+  const cleanLoad = {};
+  if (snap && Array.isArray(snap.rows)) snap.rows.forEach(r=>{
+    if(r.cleanerName && !r.isExtended && !r.isPreparation && !r.isMaintenance && !r.isCheckinOnly){
+      cleanLoad[r.cleanerName] = (cleanLoad[r.cleanerName]||0)+1;
+    }
+  });
+
+  // ---- Monthly cleanings accounting: sum each day's cleanings for this month ----
+  const monthPrefix = today.slice(0,7); // YYYY-MM
+  let monthCleanTotal = 0; const monthCleanByPerson = {}; const monthDaysByPerson = {};
+  // consider every day that has either a snapshot or a daily-extra entry this month
+  const _allDayKeys = new Set([
+    ...Object.keys((S.daily&&S.daily.snapshots)||{}),
+    ...Object.keys((S.daily&&S.daily.extra)||{})
+  ]);
+  _allDayKeys.forEach(dk=>{
+    if(dk.slice(0,7)!==monthPrefix) return;
+    const workedThisDay = new Set();
+    const sn = (S.daily.snapshots && S.daily.snapshots[dk]) || null;
+    if(sn && Array.isArray(sn.rows)) sn.rows.forEach(r=>{
+      if(!r.isExtended && !r.isPreparation && !r.isMaintenance && !r.isCheckinOnly){
+        monthCleanTotal++;
+        if(r.cleanerName){
+          monthCleanByPerson[r.cleanerName]=(monthCleanByPerson[r.cleanerName]||0)+1;
+          workedThisDay.add(r.cleanerName);
+        }
+      }
+    });
+    const ex = (S.daily.extra && S.daily.extra[dk]) || {};
+    ['odigoi','imatismos_cholargos','imatismos_thess'].forEach(bl=>{
+      const b = ex[bl] || {};
+      Object.keys(b).forEach(k=>{ if(b[k]) workedThisDay.add(b[k]); });
+    });
+    workedThisDay.forEach(nm=>{ monthDaysByPerson[nm]=(monthDaysByPerson[nm]||0)+1; });
+  });
+
+  // ---- Conflicts: someone marked OFF (ρεπό/άδεια) but ALSO given work today ----
+  const conflicts = [];
+  offToday.forEach(nm=>{
+    if (assignedToday.has(nm) || cleanLoad[nm]){
+      const why = repoToday.has(nm) ? 'day off' : 'leave';
+      conflicts.push({ name: nm, why });
+    }
+  });
+
+  // ---- Ρεπό days this week + Άδειες days this year, per person ----
+  const repoWeek = {}; const leaveYear = {};
+  Object.keys(extra).forEach(dk=>{
+    const d = parseD(dk); if(!d) return;
+    if (d>=mon && d<=sun){
+      _empCollectBlock(dk,'repo').forEach(n=>{ repoWeek[n]=(repoWeek[n]||0)+1; });
+    }
+    if (d.getFullYear()===year){
+      _empCollectBlock(dk,'adeies').forEach(n=>{ leaveYear[n]=(leaveYear[n]||0)+1; });
+    }
+  });
+
+  // ---- Owed repos: 1 repo/week entitlement. For each COMPLETED week before the
+  // current one, if the person was active that week (worked or was tracked) and
+  // did NOT take a repo and was NOT on leave that week → +1 owed. Counting starts
+  // from the earliest week present in the data, so weeks before someone appeared
+  // in the system are never charged. ----
+  const owedRepo = {};
+  (function(){
+    const allDates = Object.keys(extra).map(dk=>parseD(dk)).filter(Boolean);
+    // include snapshot dates too (cleaning activity)
+    Object.keys((S.daily&&S.daily.snapshots)||{}).forEach(dk=>{ const d=parseD(dk); if(d) allDates.push(d); });
+    if(!allDates.length) return;
+    const earliest = new Date(Math.min.apply(null, allDates.map(d=>d.getTime())));
+    // start from earliest week's Monday
+    const eDow=(earliest.getDay()+6)%7;
+    let wkMon = new Date(earliest.getFullYear(), earliest.getMonth(), earliest.getDate()-eDow);
+    // iterate weeks up to (but not including) the current week's Monday
+    while (wkMon < mon){
+      const wkSun = new Date(wkMon.getFullYear(), wkMon.getMonth(), wkMon.getDate()+6);
+      // gather per-person footprint for this week
+      const repoNames=new Set(), leaveNames=new Set(), workNames=new Set();
+      for(let dd=new Date(wkMon); dd<=wkSun; dd.setDate(dd.getDate()+1)){
+        const iso = dd.toISOString().slice(0,10);
+        _empCollectBlock(iso,'repo').forEach(n=>repoNames.add(n));
+        _empCollectBlock(iso,'adeies').forEach(n=>leaveNames.add(n));
+        ['odigoi','imatismos_cholargos','imatismos_thess'].forEach(bl=>_empCollectBlock(iso,bl).forEach(n=>workNames.add(n)));
+        const sn=(S.daily&&S.daily.snapshots&&S.daily.snapshots[iso])||null;
+        if(sn&&Array.isArray(sn.rows)) sn.rows.forEach(r=>{ if(r.cleanerName) workNames.add(r.cleanerName); });
+      }
+      roster.forEach(nm=>{
+        const active = workNames.has(nm) || repoNames.has(nm) || leaveNames.has(nm);
+        const satisfied = repoNames.has(nm) || leaveNames.has(nm);
+        if (active && !satisfied) owedRepo[nm] = (owedRepo[nm]||0)+1;
+      });
+      wkMon = new Date(wkMon.getFullYear(), wkMon.getMonth(), wkMon.getDate()+7);
+    }
+  })();
+
+  const badge = (bg,clr,txt)=>'<span style="background:'+bg+';color:'+clr+';font-size:11px;font-weight:600;padding:2px 9px;border-radius:9px">'+txt+'</span>';
+  const roleLabel = (r)=>({operator:'Operator',cleaner:'Cleaner',transporter:'Transporter'}[r]||'');
+  const roleBadge = (r)=>{
+    if(r==='operator') return badge('#E0E7FF','#3730A3','Operator');
+    if(r==='cleaner') return badge('#DCFCE7','#166534','Cleaner');
+    if(r==='transporter') return badge('#FEF3C7','#92400E','Transporter');
+    return '<span style="color:#D1D5DB">—</span>';
+  };
+  const roles = S.cleanerRoles || {};
+  // Role filter (feature 1)
+  const filter = window._empRoleFilter || 'all';
+  const filteredRoster = roster.filter(nm => filter==='all' ? true : (roles[nm]||'')===filter);
+  const rows = filteredRoster.length ? filteredRoster.slice().sort((a,b)=>a.localeCompare(b)).map(nm=>{
+    const onLeave = leaveToday.has(nm);
+    const onRepo = repoToday.has(nm);
+    const isAssigned = assignedToday.has(nm);
+    const statusToday = onLeave ? badge('#EDE9FE','#5B21B6','on leave')
+      : onRepo ? badge('#DBEAFE','#1E40AF','day off')
+      : isAssigned ? badge('#DCFCE7','#166534','working')
+      : badge('#FEF3C7','#92400E','free');
+    const usedLeave = leaveYear[nm]||0;
+    const remLeave = Math.max(0, EMP_LEAVE_TOTAL - usedLeave);
+    const repo = repoWeek[nm]||0;
+    const owed = owedRepo[nm]||0;
+    const load = cleanLoad[nm]||0;
+    const monthLoad = monthCleanByPerson[nm]||0;
+    const daysWorked = monthDaysByPerson[nm]||0;
+    const ratio = daysWorked>0 ? (monthLoad/daysWorked) : 0;
+    const ratioCell = daysWorked>0
+      ? '<b>'+ratio.toFixed(1)+'</b>'
+      : '<span style="color:#9CA3AF">—</span>';
+    const conflict = offToday.has(nm) && (isAssigned || load);
+    const leaveColor = remLeave<=3 ? '#c0392b' : (remLeave<=7 ? '#d68910' : '#1a7a4a');
+    const owedCell = owed>0
+      ? '<span style="background:#FEE2E2;color:#991B1B;font-weight:700;padding:1px 8px;border-radius:9px">'+owed+'</span>'
+      : '<span style="color:#9CA3AF">0</span>';
+    const loadCell = load>0
+      ? '<span style="font-weight:700;color:#1a1a2e">'+load+'</span>'
+      : '<span style="color:#9CA3AF">0</span>';
+    return `<tr${conflict?' style="background:#FEF2F2"':''}>
+      <td style="padding:7px 12px;border:1px solid #E5E7EB;font-weight:600;color:#1a1a2e">${String(nm).replace(/</g,'&lt;')}${conflict?' <span title="On day off/leave but also assigned work!" style="color:#DC2626">⚠️</span>':''}</td>
+      <td style="padding:6px 12px;border:1px solid #E5E7EB;text-align:center">${roleBadge(roles[nm])}</td>
+      <td style="padding:6px 12px;border:1px solid #E5E7EB;text-align:center">${statusToday}</td>
+      <td style="padding:6px 12px;border:1px solid #E5E7EB;text-align:center">${loadCell}</td>
+      <td style="padding:6px 12px;border:1px solid #E5E7EB;text-align:center;color:#4B5563">${monthLoad>0?'<b>'+monthLoad+'</b>':'<span style=\"color:#9CA3AF\">0</span>'}</td>
+      <td style="padding:6px 12px;border:1px solid #E5E7EB;text-align:center;color:#4B5563">${daysWorked>0?'<b>'+daysWorked+'</b>':'<span style=\"color:#9CA3AF\">0</span>'}</td>
+      <td style="padding:6px 12px;border:1px solid #E5E7EB;text-align:center;color:#4B5563">${ratioCell}</td>
+      <td style="padding:6px 12px;border:1px solid #E5E7EB;text-align:center;font-weight:600;color:#1a1a2e">${repo}</td>
+      <td style="padding:6px 12px;border:1px solid #E5E7EB;text-align:center">${owedCell}</td>
+      <td style="padding:6px 12px;border:1px solid #E5E7EB;text-align:center;color:#6B7280">${usedLeave}</td>
+      <td style="padding:6px 12px;border:1px solid #E5E7EB;text-align:center;font-weight:700;color:${leaveColor}">${remLeave} / ${EMP_LEAVE_TOTAL}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="11" style="padding:16px;text-align:center;color:#9CA3AF">No employees in this category.</td></tr>';
+
+  // summary counts
+  const freeCount = roster.filter(nm=>!offToday.has(nm) && !assignedToday.has(nm)).length;
+  const repoCount = roster.filter(nm=>repoToday.has(nm)).length;
+  const leaveCount = roster.filter(nm=>leaveToday.has(nm)).length;
+  const workCount = roster.filter(nm=>!offToday.has(nm) && assignedToday.has(nm)).length;
+  const owedTotal = roster.reduce((s,nm)=>s+(owedRepo[nm]||0),0);
+
+  const weekLabel = mon.toLocaleDateString('el-GR',{day:'2-digit',month:'2-digit'}) + ' – ' + sun.toLocaleDateString('el-GR',{day:'2-digit',month:'2-digit'});
+
+  // Filter chips (feature 1)
+  const chip = (key,label)=>`<button onclick="_empSetFilter('${key}')" style="font-size:11px;padding:4px 12px;border:1px solid ${filter===key?'#1a1a2e':'var(--bdr2)'};border-radius:20px;background:${filter===key?'#1a1a2e':'var(--bg)'};color:${filter===key?'#fff':'var(--tx2)'};cursor:pointer;font-weight:${filter===key?'600':'400'}">${label}</button>`;
+  const filterBar = `<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+    ${chip('all','All')}${chip('operator','Operators')}${chip('cleaner','Cleaners')}${chip('transporter','Transporters')}</div>`;
+
+  // Conflict banner (feature 3)
+  const conflictBanner = conflicts.length ? `<div style="background:#FEF2F2;border:1px solid #FCA5A5;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#991B1B">
+    ⚠️ <b>Warning:</b> ${conflicts.map(c=>String(c.name).replace(/</g,'&lt;')+' (on '+c.why+' but assigned work)').join(' · ')}</div>` : '';
+
+  panel.innerHTML = `<div style="padding:18px 22px;max-width:960px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:4px">
+      <h2 style="margin:0;font-size:20px;color:var(--tx)">👥 Employees</h2>
+      <button onclick="opsManageCleaners()" style="font-size:11px;padding:3px 10px;border:.5px solid var(--bdr2);border-radius:20px;background:var(--bg);cursor:pointer;color:var(--tx2)">＋ Manage list</button>
+    </div>
+    <div style="font-size:12px;color:var(--tx3);margin-bottom:12px">Today ${today.split('-').reverse().join('/')} · Week ${weekLabel} · Leave calculated for ${year}</div>
+    ${conflictBanner}
+    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <div style="flex:1;min-width:95px;background:#DCFCE7;border-radius:10px;padding:10px 14px"><div style="font-size:22px;font-weight:700;color:#166534">${workCount}</div><div style="font-size:11px;color:#166534">working</div></div>
+      <div style="flex:1;min-width:95px;background:#FEF3C7;border-radius:10px;padding:10px 14px"><div style="font-size:22px;font-weight:700;color:#92400E">${freeCount}</div><div style="font-size:11px;color:#92400E">free</div></div>
+      <div style="flex:1;min-width:95px;background:#DBEAFE;border-radius:10px;padding:10px 14px"><div style="font-size:22px;font-weight:700;color:#1E40AF">${repoCount}</div><div style="font-size:11px;color:#1E40AF">day off</div></div>
+      <div style="flex:1;min-width:95px;background:#EDE9FE;border-radius:10px;padding:10px 14px"><div style="font-size:22px;font-weight:700;color:#5B21B6">${leaveCount}</div><div style="font-size:11px;color:#5B21B6">on leave</div></div>
+      <div style="flex:1;min-width:95px;background:${owedTotal>0?'#FEE2E2':'#F3F4F6'};border-radius:10px;padding:10px 14px"><div style="font-size:22px;font-weight:700;color:${owedTotal>0?'#991B1B':'#6B7280'}">${owedTotal}</div><div style="font-size:11px;color:${owedTotal>0?'#991B1B':'#6B7280'}">owed days off</div></div>
+      <div style="flex:1;min-width:95px;background:#E0F2FE;border-radius:10px;padding:10px 14px"><div style="font-size:22px;font-weight:700;color:#075985">${monthCleanTotal}</div><div style="font-size:11px;color:#075985">cleanings (month)</div></div>
+    </div>
+    ${filterBar}
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:#F3F4F6">
+        <th style="padding:8px 12px;border:1px solid #E5E7EB;text-align:left">Name</th>
+        <th style="padding:8px 12px;border:1px solid #E5E7EB;text-align:center">Specialty</th>
+        <th style="padding:8px 12px;border:1px solid #E5E7EB;text-align:center">Status today</th>
+        <th style="padding:8px 12px;border:1px solid #E5E7EB;text-align:center">Cleanings today</th>
+        <th style="padding:8px 12px;border:1px solid #E5E7EB;text-align:center">Cleanings (month)</th>
+        <th style="padding:8px 12px;border:1px solid #E5E7EB;text-align:center">Days worked (month)</th>
+        <th style="padding:8px 12px;border:1px solid #E5E7EB;text-align:center">Cleanings/day</th>
+        <th style="padding:8px 12px;border:1px solid #E5E7EB;text-align:center">Days off (week)</th>
+        <th style="padding:8px 12px;border:1px solid #E5E7EB;text-align:center">Owed days off</th>
+        <th style="padding:8px 12px;border:1px solid #E5E7EB;text-align:center">Leave used</th>
+        <th style="padding:8px 12px;border:1px solid #E5E7EB;text-align:center">Leave balance</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div style="font-size:11px;color:var(--tx3);margin-top:10px">"Free" = no work assigned today and not on day off/leave. "Cleanings today" = number of properties assigned. "Cleanings (month)" = total cleanings assigned this month. "Days worked (month)" = distinct days with at least one assignment. "Cleanings/day" = average cleanings per day worked. <b>Owed days off</b>: 1 day off/week entitlement — counts completed weeks (before the current one) where the person was active but took no day off and was not on leave, starting from the first week with data. Leave balance counts "Leave" entries across the whole year out of ${EMP_LEAVE_TOTAL}.</div>
+  </div>`;
+}
+// Employees role filter state + setter (feature 1)
+function _empSetFilter(key){ window._empRoleFilter = key; renderEmployees(); }
+
 function renderOps() {
   const el = document.getElementById('tab-ops');
   if (!el) return;
@@ -7265,14 +7630,14 @@ function renderOps() {
           <thead>
             <tr style="background:#1a1a2e;color:#fff">
               <th style="padding:7px 6px;border:1px solid #374151;width:24px;text-align:center">#</th>
-              <th style="padding:7px 10px;border:1px solid #374151;text-align:left;min-width:170px">Καταλύματα</th>
+              <th style="padding:7px 10px;border:1px solid #374151;text-align:left;min-width:170px">Properties</th>
               <th style="padding:7px 8px;border:1px solid #374151;text-align:center;white-space:nowrap;width:80px">Late CO</th>
               <th style="padding:7px 8px;border:1px solid #374151;text-align:center;white-space:nowrap">Check out</th>
               <th style="padding:7px 6px;border:1px solid #374151;text-align:center;width:30px" title="Cleaned">✓</th>
-              <th style="padding:7px 8px;border:1px solid #374151;text-align:center;min-width:150px">Check in ίδιας</th>
+              <th style="padding:7px 8px;border:1px solid #374151;text-align:center;min-width:150px">Check-in same day</th>
               <th style="padding:7px 6px;border:1px solid #374151;text-align:center;width:48px">👥</th>
-              <th style="padding:7px 8px;border:1px solid #374151;text-align:center;min-width:90px">⏰ Άφιξη</th>
-              <th style="padding:7px 8px;border:1px solid #374151;text-align:left;min-width:120px">Σχόλια</th>
+              <th style="padding:7px 8px;border:1px solid #374151;text-align:center;min-width:90px">⏰ Arrival</th>
+              <th style="padding:7px 8px;border:1px solid #374151;text-align:left;min-width:120px">Comments</th>
               <th style="padding:7px 4px;border:1px solid #374151;width:28px"></th>
             </tr>
           </thead>
@@ -7297,30 +7662,54 @@ function renderOps() {
           if(!clean.length) return '';
           // Group order: turnover → refresh → sofa_bed; done sinks within all.
           const typeRank = { turnover:0, refresh:1, sofa_bed:2 };
-          clean = clean.slice().sort(function(a,b){
-            const da=a.cleanDone?1:0, db=b.cleanDone?1:0;
-            if(da!==db) return da-db;                       // not-done first
-            const ta=typeRank[a.cleanType]??9, tb=typeRank[b.cleanType]??9;
-            if(ta!==tb) return ta-tb;                       // then by type
-            return String(a.aptName).localeCompare(String(b.aptName));
-          });
+          const _cleanSort = window._opsCleanSort || 'status';
+          if (_cleanSort === 'route') {
+            // Group by assigned cleaner, unassigned last; within each cleaner
+            // order by metro proximity so apartments are in travel order.
+            clean = clean.slice().sort(function(a,b){
+              const da=a.cleanDone?1:0, db=b.cleanDone?1:0;
+              if(da!==db) return da-db;                     // done still sinks
+              const ca=String(a.cleanerName||''), cb=String(b.cleanerName||'');
+              const ea=ca?0:1, eb=cb?0:1;
+              if(ea!==eb) return ea-eb;                     // assigned before unassigned
+              if(ca!==cb) return ca.localeCompare(cb);      // group by cleaner
+              if(typeof window.aptProximityCompare==='function')
+                return window.aptProximityCompare(_opsAptOf(a), _opsAptOf(b));
+              return String(a.aptName).localeCompare(String(b.aptName));
+            });
+          } else {
+            clean = clean.slice().sort(function(a,b){
+              const da=a.cleanDone?1:0, db=b.cleanDone?1:0;
+              if(da!==db) return da-db;                       // not-done first
+              const ta=typeRank[a.cleanType]??9, tb=typeRank[b.cleanType]??9;
+              if(ta!==tb) return ta-tb;                       // then by type
+              return String(a.aptName).localeCompare(String(b.aptName));
+            });
+          }
           const clList = Array.isArray(S.cleaners) ? S.cleaners : [];
-          const TASKS = [['','—'],['genikos','Γενικός καθαρισμός'],['prepare_sofa','Prepare sofa bed'],['episkeui','Επισκευή βλάβης'],['extra','Extra']];
+          const TASKS = [['','—'],['genikos','General clean'],['prepare_sofa','Prepare sofa bed'],['episkeui','Repair'],['extra','Extra']];
           const typeBadge = function(t){
             if(t==='refresh') return '<span style="background:#DBEAFE;color:#1E40AF;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:5px">REFRESH</span>';
             if(t==='sofa_bed') return '<span style="background:#FEF3C7;color:#92400E;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:5px">SOFA BED</span>';
             return '';
           };
           let lastType = null;
+          let lastCleaner = null;
           const body = clean.map(function(r){
             const key = String(r.aptId||r.aptName||'').replace(/"/g,'&quot;');
             const stM = (typeof window.aptMetroInfo==='function') ? window.aptMetroInfo(_opsAptOf(r)) : null;
             const stLabel = (stM && stM.station) ? '<span style="font-size:10px;color:#9CA3AF;font-weight:400"> · Ⓜ '+stM.station+'</span>' : '';
             const cur = String(r.cleanerName||'');
             const done = !!r.cleanDone;
-            const opts = ['<option value="">— assign —</option>']
+            // Route mode: a small divider row when the cleaner changes
+            let divider = '';
+            if (_cleanSort==='route' && !done && cur !== lastCleaner) {
+              lastCleaner = cur;
+              divider = '<tr><td colspan="5" style="padding:4px 10px;background:#F9FAFB;border:1px solid #E5E7EB;font-size:11px;font-weight:700;color:#4B5563">🧹 '+(cur? cur : '— unassigned —')+'</td></tr>';
+            }
+            const opts = ['<option value="">— assign —</option>','<option value="External crew"'+(cur==='External crew'?' selected':'')+'>🌐 External crew</option>']
               .concat(clList.map(function(nm){ const esc=String(nm).replace(/"/g,'&quot;'); return '<option value="'+esc+'"'+(cur===nm?' selected':'')+'>'+esc+'</option>'; }));
-            if (cur && clList.indexOf(cur)===-1) opts.push('<option value="'+cur.replace(/"/g,'&quot;')+'" selected>'+cur+' (?)</option>');
+            if (cur && cur!=='External crew' && clList.indexOf(cur)===-1) opts.push('<option value="'+cur.replace(/"/g,'&quot;')+'" selected>'+cur+' (?)</option>');
             const curTask = String(r.cleanTask||'');
             const taskOpts = TASKS.map(function(t){ return '<option value="'+t[0]+'"'+(curTask===t[0]?' selected':'')+'>'+t[1]+'</option>'; }).join('');
             const nameStyle = done ? 'color:#9CA3AF;text-decoration:line-through' : 'color:#1a1a2e';
@@ -7329,31 +7718,36 @@ function renderOps() {
             if (!done && r.cleanType !== lastType && (r.cleanType==='refresh'||r.cleanType==='sofa_bed')) {
               lastType = r.cleanType;
             }
-            return '<tr'+(done?' style="background:#F0FDF4"':'')+'>'
+            return divider + '<tr'+(done?' style="background:#F0FDF4"':'')+'>'
               +'<td style="padding:3px 6px;border:1px solid #E5E7EB;text-align:center;width:34px">'
                 +'<input type="checkbox" '+(done?'checked':'')+' onchange="opsToggleCleanDoneKey(&#39;'+key+'&#39;,this.checked)" title="Σημείωσε ως καθαρισμένο" style="width:16px;height:16px;cursor:pointer"></td>'
               +'<td style="padding:5px 10px;border:1px solid #E5E7EB;font-weight:600;'+nameStyle+'">'+(r.aptName||'')+typeBadge(r.cleanType)+stLabel+'</td>'
               +'<td style="padding:3px 6px;border:1px solid #E5E7EB;width:170px">'
-                +'<select onchange="opsSetCleanerKey(&#39;'+key+'&#39;,this.value)" style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;padding:2px 4px;cursor:pointer">'+opts.join('')+'</select></td>'
+                +'<div style="display:flex;align-items:center;gap:4px">'
+                +'<select onchange="opsSetCleanerKey(&#39;'+key+'&#39;,this.value)" style="flex:1;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;padding:2px 4px;cursor:pointer">'+opts.join('')+'</select>'
+                +'<button onclick="opsAssignExternalKey(&#39;'+key+'&#39;)" title="'+(cur==='External crew'?'External crew — click to clear':'Assign to External crew')+'" style="flex-shrink:0;font-size:12px;line-height:1;padding:3px 6px;border:1px solid '+(cur==='External crew'?'#F59E0B':'#E5E7EB')+';border-radius:6px;background:'+(cur==='External crew'?'#FEF3C7':'var(--bg)')+';cursor:pointer">🌐</button>'
+                +'</div></td>'
               +'<td style="padding:3px 6px;border:1px solid #E5E7EB;width:160px">'
                 +'<select onchange="opsSetCleanFieldKey(&#39;'+key+'&#39;,&#39;cleanTask&#39;,this.value)" style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;padding:2px 4px;cursor:pointer">'+taskOpts+'</select></td>'
               +'<td style="padding:3px 6px;border:1px solid #E5E7EB;width:170px">'
-                +'<input type="text" value="'+String(r.cleanTaskNote||'').replace(/"/g,'&quot;')+'" placeholder="σημείωση…" onchange="opsSetCleanFieldKey(&#39;'+key+'&#39;,&#39;cleanTaskNote&#39;,this.value)" style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;padding:2px 4px"></td>'
+                +'<input type="text" value="'+String(r.cleanTaskNote||'').replace(/"/g,'&quot;')+'" placeholder="note…" onchange="opsSetCleanFieldKey(&#39;'+key+'&#39;,&#39;cleanTaskNote&#39;,this.value)" style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;padding:2px 4px"></td>'
               +'</tr>';
           }).join('');
           const doneCount = clean.filter(function(r){return r.cleanDone;}).length;
           return '<div style="margin-top:22px">'
             +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">'
-            +'<div style="font-size:14px;font-weight:700;color:#1a1a2e">🧽 Καθαρισμοί σήμερα <span id="ops-clean-count" style="font-size:11px;font-weight:400;color:#9CA3AF">('+doneCount+'/'+clean.length+' έτοιμα)</span></div>'
-            +'<button onclick="opsManageCleaners()" title="Add or remove cleaners" style="font-size:11px;padding:3px 10px;border:.5px solid var(--bdr2);border-radius:20px;background:var(--bg);cursor:pointer;color:var(--tx2)">👥 Καθαρίστριες</button>'
+            +'<div style="font-size:14px;font-weight:700;color:#1a1a2e">🧽 Cleanings today <span id="ops-clean-count" style="font-size:11px;font-weight:400;color:#9CA3AF">('+doneCount+'/'+clean.length+' done)</span></div>'
+            +'<button onclick="opsManageCleaners()" title="Add or remove cleaners" style="font-size:11px;padding:3px 10px;border:.5px solid var(--bdr2);border-radius:20px;background:var(--bg);cursor:pointer;color:var(--tx2)">👥 Cleaners</button>'
+            +'<button onclick="opsToggleCleanSort()" title="Toggle sorting" style="font-size:11px;padding:3px 10px;border:.5px solid var(--bdr2);border-radius:20px;background:var(--bg);cursor:pointer;color:var(--tx2)">'+(_cleanSort==='route'?'🧭 By cleaner (route)':'📋 By status')+'</button>'
+            +'<button onclick="opsCopyCleanList()" title="Copy list to share" style="font-size:11px;padding:3px 10px;border:.5px solid var(--bdr2);border-radius:20px;background:var(--bg);cursor:pointer;color:var(--tx2)">📤 Copy</button>'
             +'</div>'
             +'<table style="width:100%;max-width:760px;border-collapse:collapse;font-size:13px">'
             +'<thead><tr style="background:#F3F4F6">'
             +'<th style="padding:6px 6px;border:1px solid #E5E7EB;text-align:center;width:34px">✓</th>'
-            +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Κατάλυμα</th>'
-            +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Καθαρίστρια</th>'
-            +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Εργασία</th>'
-            +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Σημείωση</th>'
+            +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Property</th>'
+            +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Cleaner</th>'
+            +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Task</th>'
+            +'<th style="padding:6px 10px;border:1px solid #E5E7EB;text-align:left">Note</th>'
             +'</tr></thead><tbody>'+body+'</tbody></table>'
             + (function(){
                 // Four fixed daily blocks — each row assigns a person from the
@@ -7368,10 +7762,10 @@ function renderOps() {
                 }
                 function personSelect(block, idx){
                   const cur = String((dailyExtra[block] && dailyExtra[block][idx]) || '');
-                  let opts = ['<option value="">—</option>'].concat(
+                  let opts = ['<option value="">—</option>','<option value="External crew"'+(cur==='External crew'?' selected':'')+'>🌐 External crew</option>'].concat(
                     clList2.map(function(nm){ const e=String(nm).replace(/"/g,'&quot;'); return '<option value="'+e+'"'+(cur===nm?' selected':'')+'>'+e+'</option>'; })
                   );
-                  if (cur && clList2.indexOf(cur)===-1) opts.push('<option value="'+cur.replace(/"/g,'&quot;')+'" selected>'+cur+' (?)</option>');
+                  if (cur && cur!=='External crew' && clList2.indexOf(cur)===-1) opts.push('<option value="'+cur.replace(/"/g,'&quot;')+'" selected>'+cur+' (?)</option>');
                   return '<select onchange="opsSetDailyExtra(&#39;'+block+'&#39;,'+idx+',this.value)" style="width:100%;border:none;background:transparent;font-size:12px;outline:none;color:#1a1a2e;padding:2px 4px;cursor:pointer">'+opts.join('')+'</select>';
                 }
                 function blockTable(title, block, base){
@@ -7384,7 +7778,7 @@ function renderOps() {
                   return '<div style="flex:1;min-width:190px">'
                     +'<div style="font-size:13px;font-weight:700;color:#1a1a2e;margin:0 0 5px">'+title+'</div>'
                     +'<table style="width:100%;border-collapse:collapse;font-size:13px"><tbody>'+r+'</tbody></table>'
-                    +'<button onclick="opsAddDailyRow(&#39;'+block+'&#39;)" style="margin-top:4px;font-size:11px;padding:2px 10px;border:.5px solid var(--bdr2);border-radius:20px;background:var(--bg);cursor:pointer;color:var(--tx2)">+ γραμμή</button>'
+                    +'<button onclick="opsAddDailyRow(&#39;'+block+'&#39;)" style="margin-top:4px;font-size:11px;padding:2px 10px;border:.5px solid var(--bdr2);border-radius:20px;background:var(--bg);cursor:pointer;color:var(--tx2)">+ row</button>'
                     +'</div>';
                 }
                 // Ιματισμός has two labeled subsections (each its own sub-block key).
@@ -7397,19 +7791,19 @@ function renderOps() {
                   }
                   return '<div style="font-size:11px;font-weight:600;color:#6B7280;margin:6px 0 3px">'+label+'</div>'
                     +'<table style="width:100%;border-collapse:collapse;font-size:13px"><tbody>'+r+'</tbody></table>'
-                    +'<button onclick="opsAddDailyRow(&#39;'+block+'&#39;)" style="margin-top:3px;font-size:11px;padding:2px 10px;border:.5px solid var(--bdr2);border-radius:20px;background:var(--bg);cursor:pointer;color:var(--tx2)">+ γραμμή</button>';
+                    +'<button onclick="opsAddDailyRow(&#39;'+block+'&#39;)" style="margin-top:3px;font-size:11px;padding:2px 10px;border:.5px solid var(--bdr2);border-radius:20px;background:var(--bg);cursor:pointer;color:var(--tx2)">+ row</button>';
                 }
                 function imatismosBlock(){
                   return '<div style="flex:1;min-width:190px">'
-                    +'<div style="font-size:13px;font-weight:700;color:#1a1a2e;margin:0 0 5px">Ιματισμός</div>'
-                    + subTable('Χολαργός', 'imatismos_cholargos', 1)
-                    + subTable('Θεσσαλονίκη', 'imatismos_thess', 1)
+                    +'<div style="font-size:13px;font-weight:700;color:#1a1a2e;margin:0 0 5px">Linen</div>'
+                    + subTable('Cholargos', 'imatismos_cholargos', 1)
+                    + subTable('Thessaloniki', 'imatismos_thess', 1)
                     +'</div>';
                 }
                 return '<div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:18px;max-width:900px">'
-                  + blockTable('Ρεπό', 'repo', baseCounts.repo)
-                  + blockTable('Άδειες', 'adeies', baseCounts.adeies)
-                  + blockTable('Οδηγοί / Μεταφορείς', 'odigoi', baseCounts.odigoi)
+                  + blockTable('Day off', 'repo', baseCounts.repo)
+                  + blockTable('Leave', 'adeies', baseCounts.adeies)
+                  + blockTable('Drivers / Transporters', 'odigoi', baseCounts.odigoi)
                   + imatismosBlock()
                   + '</div>';
               })()
@@ -7435,8 +7829,8 @@ function renderOps() {
             +'<div style="font-size:11px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">📋 Εκκρεμείς εργασίες ('+pending.length+')</div>'
             +'<table style="border-collapse:collapse;width:100%;font-size:11px"><thead>'
             +'<tr style="background:#F3F4F6"><th style="padding:4px 8px;border:1px solid #E5E7EB;width:20px"></th>'
-            +'<th style="padding:4px 8px;border:1px solid #E5E7EB;text-align:left;color:#374151">Κατάλυμα</th>'
-            +'<th style="padding:4px 8px;border:1px solid #E5E7EB;text-align:left;color:#374151">Εργασία</th>'
+            +'<th style="padding:4px 8px;border:1px solid #E5E7EB;text-align:left;color:#374151">Property</th>'
+            +'<th style="padding:4px 8px;border:1px solid #E5E7EB;text-align:left;color:#374151">Task</th>'
             +'<th style="padding:4px 8px;border:1px solid #E5E7EB;text-align:left;color:#374151">Από</th></tr>'
             +'</thead><tbody>'+rows+'</tbody></table></div>';
         })()}
