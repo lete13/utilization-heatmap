@@ -6,8 +6,12 @@ This repository (`lete13/utilization-heatmap`) is a **sandbox mirror** of [`lete
 
 ### Workflow
 
-- **Develop here** → commit/push to `utilization-heatmap` (use **feature branches** for experiments; `main` is auto-synced from upstream)
-- **Promote to production** → cherry-pick or open a PR from heatmap into `elysian-clearing`, or manually port the diff
+**Never push to `lete13/elysian-clearing`.** That repo is production and is strictly read-only for agents: fetch from it, never write to it. Promoting work there is the owner's decision, done manually.
+
+Within this sandbox repo, working on a feature branch (e.g. `cursor/my-change-5c94`) and **merging into `utilization-heatmap` `main` is allowed**.
+
+- **Develop here** → feature branch → PR → merge into heatmap `main`
+- **Promote to production** → the owner ports the diff to `elysian-clearing`; agents do not push there
 
 ### Auto-sync from `elysian-clearing` main
 
@@ -17,9 +21,9 @@ Upstream changes arrive as a **reviewable pull request**, never as a force-push.
 - **Manual** — Actions → “Sync from elysian-clearing” → Run workflow
 - **Instant (optional)** — add `docs/elysian-clearing-sync-trigger.yml.example` to `elysian-clearing` with a `HEATMAP_SYNC_TOKEN` secret
 
-The job **never writes to `main`**, so sandbox-only work committed here is safe. Merge the sync PR when you want upstream changes; a file changed both upstream and here (e.g. `fe/daily-ops-beta.js`) surfaces as a normal merge conflict instead of being silently discarded.
+The job **never writes to `main`**, so work already on `main` is not overwritten by a sync. Merge the sync PR when you want upstream changes; a file changed both upstream and here (e.g. `fe/daily-ops-beta.js`) surfaces as a normal merge conflict instead of being silently discarded.
 
-Because of this, committing sandbox work to `main` is safe. `sync/elysian-clearing` is machine-managed — never commit to it.
+`sync/elysian-clearing` is machine-managed and force-updated — never commit to it. Sync PRs are still the owner's to merge.
 
 ### Running locally (single Node/Express app + PostgreSQL)
 
