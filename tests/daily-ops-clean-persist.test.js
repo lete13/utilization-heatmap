@@ -136,6 +136,21 @@ assert(!/nav-opsbeta|tab-opsbeta|opsbeta/.test(betaJs), 'no Beta dual-tab wiring
 assert(/cleanerChipsHtml|ob-cchip/.test(betaJs), 'multi-cleaner chips present');
 assert(/manage-cleaners/.test(betaJs), 'Καθαρίστριες roster manage wired');
 
+// Managed tags (PRIORITY / Late / sofa) are chips; the notes input owns only
+// the free-text remainder and recomposes on save, so typing a note can no
+// longer silently drop a managed tag out of row.comments.
+assert(/function composeNote/.test(betaJs), 'note edits recompose managed tags with free text');
+assert(/function managedParts/.test(betaJs), 'managed comment parts are identified separately');
+assert(/function freeNoteText/.test(betaJs), 'notes input is fed only the free-text remainder');
+assert(
+  /row\.comments = next;[\s\S]{0,80}row\.cleanTaskNote = next;/.test(betaJs),
+  'comments and cleanTaskNote stay in sync on the same joined string'
+);
+
+// Removing a row / cycling check-in is board-local: _opsLoadData rebuilds rows
+// from live bookings, so the repaint must not reload and undo the click.
+assert(/state\.skipReload = true/.test(betaJs), 'board-local mutations repaint without reloading');
+
 assert(!html.includes('id="nav-opsbeta"'), 'Beta nav removed from tip HTML');
 assert(!html.includes('id="tab-opsbeta"'), 'Beta tab panel removed from tip HTML');
 assert(html.includes('id="nav-ops">Daily Ops'), 'single Daily Ops nav remains');

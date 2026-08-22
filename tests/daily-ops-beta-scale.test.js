@@ -247,4 +247,134 @@ context._opsBetaState.filter = 'all';
 context.renderOps();
 assert(panel.innerHTML.includes('Arrival Studio'), 'All filter still shows arrival-only rows');
 
-console.log('daily-ops-beta-scale: ok (promoted #tab-ops + note colors + chips + fit-all + urgency + arrival filters)');
+// ── dispatch console redesign ───────────────────────────────────────────────
+
+// The triage rail must discriminate, not just restate "all". Every segment
+// carries a plain "Label N" accessible name so counts are assertable.
+['all', 'attention', 'unknown', 'open', 'unassigned', 'done'].forEach((key) => {
+  assert(
+    panel.innerHTML.includes('data-ob-filter="' + key + '"'),
+    'triage rail keeps the ' + key + ' segment'
+  );
+});
+assert(panel.innerHTML.includes('Blocking'), 'rail exposes a Blocking segment');
+assert(panel.innerHTML.includes('Unknown check-in'), 'rail exposes an Unknown check-in segment');
+
+const railCount = (label) => {
+  const hit = panel.innerHTML.match(new RegExp('title="' + label + ' (\\d+)"'));
+  return hit ? Number(hit[1]) : -1;
+};
+const blocking = railCount('Blocking');
+const openCount = railCount('Open');
+const allCount = railCount('All');
+assert(blocking > 0 && openCount > 0 && allCount > 0, 'rail segments carry live counts');
+assert(blocking < openCount, 'Blocking is narrower than Open (segment actually discriminates)');
+assert(openCount < allCount, 'Open is narrower than All');
+
+// Done work never blocks, and neither does a row that already has a crew.
+assert(
+  blocking <= allCount - railCount('Done'),
+  'finished rows are excluded from Blocking'
+);
+
+// Grouping: "default" sort means source order, so it must never regroup.
+assert(!panel.innerHTML.includes('ob-grp'), 'default sort renders an ungrouped board');
+context._opsBetaState.sort = 'status';
+context.renderOps();
+assert(panel.innerHTML.includes('ob-grp'), 'status sort renders grouped sections');
+assert(panel.innerHTML.includes('ακίνητα'), 'group headers summarise their section');
+const groupCount = (panel.innerHTML.match(/class="ob-grp"/g) || []).length;
+assert(groupCount >= 2, 'area grouping produces more than one section');
+assert(
+  (panel.innerHTML.match(/class="ob-dispatch-row/g) || []).length > groupCount,
+  'group header rows are not counted as dispatch rows'
+);
+context._opsBetaState.group = 'none';
+context.renderOps();
+assert(!panel.innerHTML.includes('ob-grp'), 'grouping can be switched off');
+context._opsBetaState.group = 'area';
+context._opsBetaState.sort = 'default';
+context.renderOps();
+
+// Row ⋯ menu restores the kind override and remove-row parity gaps.
+const rowId = (panel.innerHTML.match(/<tr class="ob-dispatch-row[^>]*data-ob-id="([^"]+)"/) || [])[1];
+assert(rowId, 'dispatch rows carry a stable id');
+assert(panel.innerHTML.includes('data-ob-action="row-menu"'), 'rows expose an actions menu');
+listeners.click(event('row-menu', { dataset: { obAction: 'row-menu', obId: rowId } }));
+assert(panel.innerHTML.includes('data-ob-action="kind"'), 'row menu restores the kind override');
+assert(panel.innerHTML.includes('data-ob-action="row-remove"'), 'row menu restores remove row');
+assert(/data-ob-action="flag"[^>]*data-ob-flag="park"/.test(panel.innerHTML), 'row menu can set an inactive flag');
+listeners.click(event('row-menu', { dataset: { obAction: 'row-menu', obId: rowId } }));
+assert(!panel.innerHTML.includes('data-ob-action="row-remove"'), 'row menu closes again');
+
+// Cleaner assignment is the primary board action: a workload-aware popover.
+assert(panel.innerHTML.includes('data-ob-action="assign-open"'), 'rows expose an assign control');
+listeners.click(event('assign-open', { dataset: { obAction: 'assign-open', obId: rowId } }));
+assert(panel.innerHTML.includes('ob-pop'), 'assign popover renders');
+assert(panel.innerHTML.includes('data-ob-action="assign-pick"'), 'assign popover offers the roster');
+assert(panel.innerHTML.includes('ob-ld'), 'assign popover shows per-cleaner workload');
+listeners.click(event('assign-open', { dataset: { obAction: 'assign-open', obId: rowId } }));
+
+// Contextual bulk bar: idle affordance until something is selected.
+listeners.click(event('clear-selection'));
+assert(panel.innerHTML.includes('ob-bulk-idle'), 'bulk bar is idle with an empty selection');
+listeners.change(event('select-page', { checked: true }));
+assert(panel.innerHTML.includes('ob-bulk active'), 'bulk bar activates on selection');
+assert(/data-ob-action="select-page"[^>]*checked/.test(panel.innerHTML), 'page checkbox reflects the selection after rerender');
+listeners.click(event('clear-selection'));
+assert(panel.innerHTML.includes('ob-bulk-idle'), 'clearing the selection restores the idle bar');
+
+// Restored parity: schedule-check mount, plain-text copy list, no window.prompt.
+assert(panel.innerHTML.includes('id="ops-schedcheck"'), 'schedule-check OCR panel has a mount point');
+listeners.click(event('bar-menu'));
+assert(panel.innerHTML.includes('data-ob-action="copy-list"'), 'plain-text copy list is exposed');
+assert(panel.innerHTML.includes('data-ob-action="ops-image"'), 'Ops image export is exposed');
+assert(panel.innerHTML.includes('data-ob-action="cleaner-image"'), 'cleaner image export is exposed');
+assert(panel.innerHTML.includes('data-ob-action="schedule-check"'), 'schedule check upload is exposed');
+assert(panel.innerHTML.includes('data-ob-action="restart"'), 'restart cleans is exposed');
+listeners.click(event('bar-menu'));
+
+// Inline task composer replaces the old window.prompt() flow.
+listeners.click(event('task-open'));
+assert(panel.innerHTML.includes('ob-composer'), 'inline task composer renders');
+assert(panel.innerHTML.includes('data-ob-action="task-text"'), 'composer has a text field');
+assert(panel.innerHTML.includes('data-ob-action="task-apt"'), 'composer can attach an apartment');
+assert(panel.innerHTML.includes('data-ob-action="task-save"'), 'composer can save');
+listeners.click(event('task-cancel'));
+
+// Every capability the board exposed before must still be reachable.
+[
+  'nav', 'today', 'date', 'filter', 'sort', 'search', 'page', 'page-size',
+  'select', 'select-page', 'select-all-results', 'clear-selection',
+  'bulk-cleaner', 'bulk-task', 'bulk-done', 'bulk-open',
+  'clean', 'checkin', 'flag', 'row-field', 'comment', 'clean-field',
+  'cleaner-add', 'cleaner-remove', 'manage-cleaners',
+  'task-toggle', 'task-delete', 'staff', 'staff-add', 'leave-days',
+  'route-add', 'route-remove', 'notes', 'schedule-file', 'group',
+].forEach((action) => {
+  assert(
+    betaJs.includes('data-ob-action="' + action + '"'),
+    'feature preserved: ' + action
+  );
+});
+assert(!/window\.prompt\(/.test(betaJs), 'task creation no longer uses window.prompt');
+
+// Scroll + focus survival across a full innerHTML swap.
+assert(betaJs.includes('captureContext') && betaJs.includes('restoreContext'), 'render snapshots and restores UI context');
+assert(betaJs.includes('data-ob-focus'), 'focusable controls carry a stable restore key');
+assert(/typeof window\.scrollTo === 'function'/.test(betaJs), 'scroll restore is feature-detected');
+assert(/setSelectionRange/.test(betaJs), 'caret position is restored after rerender');
+assert(/if \(state\.saveTimer\) persist\(false\)/.test(betaJs), 'pending edits flush before a repaint reloads rows');
+
+// Sticky day bar / rail / table header must not sit in a scroll container.
+assert(!/ob-table-wrap\s*\{[^}]*overflow-x:\s*auto/.test(css), 'table wrap is not a horizontal scroll container');
+assert(/\.ob-command\s*\{[^}]*position:\s*sticky/.test(css), 'day command bar is sticky');
+assert(/\.ob-rail\s*\{[^}]*position:\s*sticky/.test(css), 'triage rail is sticky');
+assert(/\.ob-dispatch-table th\s*\{[^}]*position:\s*sticky/.test(css), 'column header is sticky');
+assert(/--ob-stick/.test(css), 'sticky offsets come from one shared token');
+
+// Responsive: the table collapses into cards below desktop.
+assert(/@media \(max-width: 1180px\)/.test(css), 'card breakpoint defined below desktop');
+assert(/grid-template-areas/.test(css), 'rows become cards via grid areas');
+
+console.log('daily-ops-beta-scale: ok (dispatch console: triage rail + grouping + row menu + assign popover + composer + scroll/focus + cards)');
