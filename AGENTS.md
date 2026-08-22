@@ -11,15 +11,15 @@ This repository (`lete13/utilization-heatmap`) is a **sandbox mirror** of [`lete
 
 ### Auto-sync from `elysian-clearing` main
 
-`main` on this repo is kept in sync with [`lete13/elysian-clearing`](https://github.com/lete13/elysian-clearing) `main` by GitHub Actions (`.github/workflows/sync-from-elysian-clearing.yml`):
+Upstream changes arrive as a **reviewable pull request**, never as a force-push. `.github/workflows/sync-from-elysian-clearing.yml`:
 
-- **Every 10 minutes** — polls upstream; pushes here only when upstream changed
+- **Every 10 minutes** — if [`lete13/elysian-clearing`](https://github.com/lete13/elysian-clearing) `main` is not already contained in this repo's `main`, it force-updates the `sync/elysian-clearing` branch to upstream `main` and opens (or refreshes) a PR into `main`
 - **Manual** — Actions → “Sync from elysian-clearing” → Run workflow
 - **Instant (optional)** — add `docs/elysian-clearing-sync-trigger.yml.example` to `elysian-clearing` with a `HEATMAP_SYNC_TOKEN` secret
 
-Sandbox-only files preserved across syncs: `AGENTS.md`, `.sandbox-upstream-sha`. Everything else is replaced with upstream `main`.
+The job **never writes to `main`**, so sandbox-only work committed here is safe. Merge the sync PR when you want upstream changes; a file changed both upstream and here (e.g. `fe/daily-ops-beta.js`) surfaces as a normal merge conflict instead of being silently discarded.
 
-**Do not commit experiments directly to `main` here** — they will be overwritten on the next sync. Use a feature branch (e.g. `cursor/my-experiment-5c94`).
+Because of this, committing sandbox work to `main` is safe. `sync/elysian-clearing` is machine-managed — never commit to it.
 
 ### Running locally (single Node/Express app + PostgreSQL)
 
