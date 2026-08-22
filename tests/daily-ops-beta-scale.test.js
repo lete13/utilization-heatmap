@@ -261,7 +261,7 @@ assert(panel.innerHTML.includes('Blocking'), 'rail exposes a Blocking segment');
 assert(panel.innerHTML.includes('Unknown check-in'), 'rail exposes an Unknown check-in segment');
 
 const railCount = (label) => {
-  const hit = panel.innerHTML.match(new RegExp('title="' + label + ' (\\d+)"'));
+  const hit = panel.innerHTML.match(new RegExp('aria-label="' + label + ' (\\d+)"'));
   return hit ? Number(hit[1]) : -1;
 };
 const blocking = railCount('Blocking');
@@ -377,4 +377,147 @@ assert(/--ob-stick/.test(css), 'sticky offsets come from one shared token');
 assert(/@media \(max-width: 1180px\)/.test(css), 'card breakpoint defined below desktop');
 assert(/grid-template-areas/.test(css), 'rows become cards via grid areas');
 
-console.log('daily-ops-beta-scale: ok (dispatch console: triage rail + grouping + row menu + assign popover + composer + scroll/focus + cards)');
+// ── video-review defects ────────────────────────────────────────────────────
+
+// 1. No native tooltips. Chrome renders title= as a black popup on click, which
+// read as a debug toast ("Blocking 10", "Ενέργειες γραμμής") during review.
+// Accessible names move to aria-label, which never paints anything.
+assert(!/title="/.test(betaJs), 'no control emits a native title= tooltip');
+assert(
+  /data-ob-action="filter"[^>]*aria-label="/.test(panel.innerHTML),
+  'filter pills keep an accessible name without a tooltip'
+);
+assert(
+  !/data-ob-action="filter"[^>]*title=/.test(panel.innerHTML),
+  'clicking a filter pill pops up nothing'
+);
+assert(
+  /data-ob-action="row-menu"[^>]*aria-label="Ενέργειες γραμμής"/.test(panel.innerHTML),
+  'row actions button is labelled for assistive tech'
+);
+assert(
+  !/data-ob-action="row-menu"[^>]*title=/.test(panel.innerHTML),
+  'opening the row actions menu pops up nothing'
+);
+
+// 2. Menu rows share one three-track grid so ticked, icon-only and bare items
+// all align on the same text column.
+listeners.click(event('row-menu', { dataset: { obAction: 'row-menu', obId: rowId } }));
+const menuItems = panel.innerHTML.match(/<button type="button" class="ob-mi[^"]*"[^>]*>/g) || [];
+assert(menuItems.length >= 5, 'row menu is built from shared menu items');
+const menuHtml = panel.innerHTML.slice(panel.innerHTML.indexOf('<div class="ob-menu">'));
+['ob-mi-state', 'ob-mi-icon', 'ob-mi-label'].forEach((cls) => {
+  assert(menuHtml.includes(cls), 'menu items carry the ' + cls + ' gutter');
+});
+assert(
+  (menuHtml.match(/ob-mi-state/g) || []).length === (menuHtml.match(/ob-mi-label/g) || []).length,
+  'every menu item has both a state gutter and a label, so none can shift left'
+);
+assert(
+  /class="ob-mi[^"]*ob-danger"/.test(panel.innerHTML),
+  'the destructive item uses the same aligned shape as the rest'
+);
+assert(
+  /#tab-ops \.ob-menu button \{[^}]*grid-template-columns:\s*13px 18px 1fr/.test(css),
+  'menu gutters are fixed tracks so empty ones still reserve their width'
+);
+assert(
+  /\.ob-mi-state,\s*#tab-ops \.ob-mi-icon \{[^}]*justify-self:\s*stretch/.test(css),
+  'gutters fill their track, so glyphs of different widths cannot shift the row'
+);
+listeners.click(event('row-menu', { dataset: { obAction: 'row-menu', obId: rowId } }));
+
+// 3. The triage rail has to survive a phone. It is the sticky element there
+// (the day bar stands down), it grows instead of clipping, and the chips scroll
+// behind a shadow affordance rather than silently ending.
+assert(/@media \(max-width: 540px\)/.test(css), 'a narrow tier exists below the tablet card');
+assert(
+  /@media \(max-width: 900px\)[^@]*\.ob-rail\s*\{[^}]*height:\s*auto/.test(css),
+  'the rail grows with its content instead of clipping to a fixed height'
+);
+assert(
+  /@media \(max-width: 900px\)[^@]*\.ob-command\s*\{[^}]*position:\s*static/.test(css),
+  'the day bar stops being sticky on narrow screens'
+);
+assert(
+  /@media \(max-width: 900px\)[^@]*\.ob-rail\s*\{[^}]*top:\s*0/.test(css),
+  'the rail takes over as the pinned strip so filters stay reachable'
+);
+assert(/\.ob-segs\s*\{[^}]*overflow-x:\s*auto/.test(css), 'filter chips scroll horizontally');
+assert(
+  /\.ob-segs\s*\{[^}]*radial-gradient\(farthest-side at 100% 50%/.test(css),
+  'chips carry a scroll-shadow affordance showing there is more to reach'
+);
+assert(
+  !/@media \(max-width: 540px\)[^@]*\.ob-segs\s*\{[^}]*display:\s*none/.test(css),
+  'the rail is never hidden on a phone'
+);
+
+// 4. Mobile day bar and console header get room to breathe instead of clipping.
+assert(
+  /@media \(max-width: 900px\)[^@]*\.ob-command\s*\{[^}]*flex-wrap:\s*wrap/.test(css),
+  'the day bar wraps rather than overflowing'
+);
+assert(
+  /@media \(max-width: 900px\)[^@]*\.ob-board-head\s*\{[^}]*flex-direction:\s*column/.test(css),
+  'the dispatch console header stacks on narrow screens'
+);
+assert(
+  /@media \(max-width: 900px\)[^@]*\.ob-progress\s*\{[^}]*width:\s*100%/.test(css),
+  'the progress bar takes the full width once the header stacks'
+);
+assert(
+  /@media \(max-width: 540px\)[^@]*grid-template-columns:\s*20px 24px minmax\(0, 1fr\) auto/.test(css),
+  'the narrow card drops a track so its bands cannot overflow'
+);
+
+// 5. Remove row must actually remove the row.
+context._opsBetaState.filter = 'all';
+context._opsBetaState.pageSize = 0;
+context._opsBetaState.page = 1;
+context.renderOps();
+
+const removeTarget = rows[3];
+const removeTargetName = removeTarget.aptName;
+const beforeRemove = renderedRows();
+const beforeLength = rows.length;
+assert(panel.innerHTML.includes(removeTargetName), 'the row to remove is on the board first');
+
+// Cancelling at the confirm must change nothing.
+context.confirm = () => false;
+listeners.click(event('row-remove', { dataset: { obAction: 'row-remove', obIndex: '3' } }));
+assert.strictEqual(rows.length, beforeLength, 'declining the confirm keeps the row in the day');
+assert.strictEqual(renderedRows(), beforeRemove, 'declining the confirm leaves the board untouched');
+assert(panel.innerHTML.includes(removeTargetName), 'the row is still rendered after cancelling');
+
+// Confirming must drop it from _opsRows and from the repaint.
+context.confirm = () => true;
+listeners.click(event('row-remove', { dataset: { obAction: 'row-remove', obIndex: '3' } }));
+assert.strictEqual(rows.length, beforeLength - 1, 'confirming removes exactly one row from the day');
+assert.strictEqual(renderedRows(), beforeRemove - 1, 'the removed row is gone from the repaint');
+assert(!rows.some((row) => row.aptName === removeTargetName), 'the removed row is out of the array');
+assert(!panel.innerHTML.includes(removeTargetName), 'the removed row is off the board');
+assert(
+  panel.innerHTML.includes('showing ' + (beforeRemove - 1) + ' of ' + (beforeRemove - 1)),
+  'the board head count follows the removal'
+);
+
+// It must go through the host's remove helper when the app provides one, so the
+// beta board and the legacy board delete rows the same way.
+let delegated = 0;
+context.opsRemoveRow = (index) => { delegated += 1; rows.splice(index, 1); };
+const beforeDelegate = rows.length;
+listeners.click(event('row-remove', { dataset: { obAction: 'row-remove', obIndex: '2' } }));
+assert.strictEqual(delegated, 1, 'removal defers to the host opsRemoveRow when it exists');
+assert.strictEqual(rows.length, beforeDelegate - 1, 'the delegated removal took the row out');
+
+// A host helper that declines (user cancelled) must not repaint a phantom.
+const beforeDecline = rows.length;
+const paintedBefore = panel.innerHTML;
+context.opsRemoveRow = () => {};
+listeners.click(event('row-remove', { dataset: { obAction: 'row-remove', obIndex: '2' } }));
+assert.strictEqual(rows.length, beforeDecline, 'a declined host removal changes nothing');
+assert.strictEqual(panel.innerHTML, paintedBefore, 'a declined host removal does not repaint');
+delete context.opsRemoveRow;
+
+console.log('daily-ops-beta-scale: ok (dispatch console + no-tooltip controls, aligned menus, phone rail, row removal)');

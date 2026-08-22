@@ -419,7 +419,7 @@
     return '<div class="ob-nchips">' + parts.map(function (part) {
       var flag = extra ? '' : flagForPart(part);
       var remove = flag
-        ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" title="Αφαίρεση">×</button>'
+        ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Αφαίρεση">×</button>'
         : '';
       return '<span class="ob-nchip' + partTone(part) + '">' + esc(part) + remove + '</span>';
     }).join('') + '</div>';
@@ -436,7 +436,7 @@
       : stateName === 'no'
         ? { cls: 'ob-red', text: 'Όχι' }
         : { cls: 'ob-amber', text: 'Δεν ξέρουμε' };
-    return '<button class="ob-chip ob-checkin ' + cfg.cls + '" data-ob-action="checkin" data-ob-index="' + index + '" title="Εναλλαγή check-in">' + esc(cfg.text) + '</button>';
+    return '<button class="ob-chip ob-checkin ' + cfg.cls + '" data-ob-action="checkin" data-ob-index="' + index + '" aria-label="Εναλλαγή check-in">' + esc(cfg.text) + '</button>';
   }
 
   var FLAG_DEFS = [
@@ -455,13 +455,13 @@
       // a quiet solid icon instead of a labelled chip.
       return row[f[3]] && !(f[0] === 'priority' && !escalated(row));
     }).map(function (f) {
-      return '<button type="button" class="ob-sig ' + f[4] + '" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + f[0] + '" title="' + esc(f[2]) + ' — κλικ για αφαίρεση">' + f[1] + ' ' + esc(f[2]) + '</button>';
+      return '<button type="button" class="ob-sig ' + f[4] + '" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + f[0] + '" aria-label="' + esc(f[2]) + ' — κλικ για αφαίρεση">' + f[1] + ' ' + esc(f[2]) + '</button>';
     }).join('');
     if (row.isPriority && !escalated(row)) {
-      html += '<button type="button" class="ob-mini-flag hot on" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="priority" title="Priority (αυτόματο same-day)" aria-label="Priority">❗</button>';
+      html += '<button type="button" class="ob-mini-flag hot on" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="priority" aria-label="Priority (αυτόματο same-day)">❗</button>';
     }
     if (row.checkinSameDay === 'unknown') {
-      html += '<span class="ob-chip ob-amber" title="Άγνωστο check-in">? check-in</span>';
+      html += '<span class="ob-chip ob-amber">? check-in</span>';
     }
     return '<div class="ob-row-flags">' + (html || '<span class="ob-row-muted">—</span>') + '</div>';
   }
@@ -530,10 +530,10 @@
     var open = state.assignFor === id;
     var chips = names.map(function (nm, ni) {
       return '<span class="ob-cchip">' + esc(nm) +
-        '<button type="button" data-ob-action="cleaner-remove" data-ob-key="' + encoded(key) + '" data-ob-idx="' + ni + '" title="Αφαίρεση">×</button></span>';
+        '<button type="button" data-ob-action="cleaner-remove" data-ob-key="' + encoded(key) + '" data-ob-idx="' + ni + '" aria-label="Αφαίρεση">×</button></span>';
     }).join('');
     var trigger = names.length
-      ? '<button type="button" class="ob-cadd" data-ob-action="assign-open" data-ob-id="' + encoded(id) + '" title="Προσθήκη ατόμου">+</button>'
+      ? '<button type="button" class="ob-cadd" data-ob-action="assign-open" data-ob-id="' + encoded(id) + '" aria-label="Προσθήκη ατόμου">+</button>'
       : '<button type="button" class="ob-assign" data-ob-action="assign-open" data-ob-id="' + encoded(id) + '">+ Ανάθεση</button>';
     return '<div class="ob-cchips-wrap">' +
       (chips ? '<div class="ob-cchips">' + chips + '</div>' : '') +
@@ -542,24 +542,42 @@
       '</div>';
   }
 
+  // Every menu row is the same three-column shape — state tick, icon, label —
+  // so items with an emoji and items without still line their text up. The two
+  // gutters are fixed-width in CSS and stay in the flow when they are empty.
+  function menuItemHtml(attrs, icon, label, on, extraClass) {
+    return '<button type="button" class="ob-mi' + (on ? ' ob-on' : '') + (extraClass ? ' ' + extraClass : '') + '" ' + attrs +
+      (on ? ' aria-pressed="true"' : '') + '>' +
+      '<span class="ob-mi-state">' + (on ? '✓' : '') + '</span>' +
+      '<span class="ob-mi-icon">' + (icon || '') + '</span>' +
+      '<span class="ob-mi-label">' + esc(label) + '</span>' +
+      '</button>';
+  }
+
   function rowMenuHtml(item) {
     var row = item.row || {};
     var kinds = (typeof OPS_KINDS !== 'undefined' && Array.isArray(OPS_KINDS)) ? OPS_KINDS : [];
     var flagButtons = FLAG_DEFS.map(function (f) {
-      var on = !!row[f[3]];
-      return '<button type="button" class="' + (on ? 'ob-on' : '') + '" data-ob-action="flag" data-ob-index="' + item.index + '" data-ob-flag="' + f[0] + '">' +
-        f[1] + ' ' + esc(f[2]) + (on ? ' ✓' : '') + '</button>';
+      return menuItemHtml(
+        'data-ob-action="flag" data-ob-index="' + item.index + '" data-ob-flag="' + f[0] + '"',
+        f[1], f[2], !!row[f[3]]
+      );
     }).join('');
+    // OPS_KINDS carries short word icons ("Mnt", "Prep") meant for the legacy
+    // square buttons. They do not fit an 18px gutter and only repeat the label
+    // next to them, so the kind rows leave the icon track empty and rely on the
+    // tick to show state.
     var kindButtons = kinds.map(function (kind) {
-      var on = !!row[kind.key];
-      return '<button type="button" class="' + (on ? 'ob-on' : '') + '" data-ob-action="kind" data-ob-index="' + item.index + '" data-ob-kind="' + esc(kind.key) + '">' +
-        (on ? '✓ ' : '') + esc(kind.label || kind.key) + '</button>';
+      return menuItemHtml(
+        'data-ob-action="kind" data-ob-index="' + item.index + '" data-ob-kind="' + esc(kind.key) + '"',
+        '', kind.label || kind.key, !!row[kind.key]
+      );
     }).join('');
     return '<div class="ob-menu">' +
       '<h6>Σήματα</h6>' + flagButtons +
       (kindButtons ? '<hr><h6>Τύπος κράτησης</h6>' + kindButtons : '') +
       '<hr>' +
-      '<button type="button" class="ob-danger" data-ob-action="row-remove" data-ob-index="' + item.index + '">Αφαίρεση γραμμής</button>' +
+      menuItemHtml('data-ob-action="row-remove" data-ob-index="' + item.index + '"', '🗑', 'Αφαίρεση γραμμής', false, 'ob-danger') +
       '</div>';
   }
 
@@ -581,7 +599,7 @@
     var statusText = done ? 'DONE' : (!target ? 'NO CLEAN' : (!names ? 'UNASSIGNED' : 'OPEN'));
     var checkin = item.extra ? '<span class="ob-row-muted">—</span>' : checkinHtml(row, item.index);
     var cleanControl = target
-      ? '<input class="ob-clean-check" type="checkbox" data-ob-action="clean" data-ob-key="' + encoded(item.key) + '"' + (done ? ' checked' : '') + ' title="Καθαρίστηκε">'
+      ? '<input class="ob-clean-check" type="checkbox" data-ob-action="clean" data-ob-key="' + encoded(item.key) + '"' + (done ? ' checked' : '') + ' aria-label="Καθαρίστηκε">'
       : '<span class="ob-row-muted">—</span>';
     var cleanerControl = cleanerChipsHtml(item, load);
     var taskControl = target
@@ -589,10 +607,10 @@
       : '<span class="ob-row-muted">—</span>';
     var paxControl = item.extra
       ? '<span class="ob-row-muted">' + esc(row.people || '—') + '</span>'
-      : '<input class="ob-input ob-row-pax" type="number" min="0" max="20" value="' + esc(row.people || '') + '" data-ob-action="row-field" data-ob-index="' + item.index + '" data-ob-field="people" data-ob-focus="pax:' + item.index + '" placeholder="—" title="Άτομα">';
+      : '<input class="ob-input ob-row-pax" type="number" min="0" max="20" value="' + esc(row.people || '') + '" data-ob-action="row-field" data-ob-index="' + item.index + '" data-ob-field="people" data-ob-focus="pax:' + item.index + '" placeholder="—" aria-label="Άτομα">';
     var etaControl = item.extra
       ? '<span class="ob-row-muted">—</span>'
-      : '<input class="ob-input ob-row-eta" value="' + esc(row.arrivalTime || '') + '" data-ob-action="row-field" data-ob-index="' + item.index + '" data-ob-field="arrivalTime" data-ob-focus="eta:' + item.index + '" placeholder="ETA" title="Ώρα άφιξης">';
+      : '<input class="ob-input ob-row-eta" value="' + esc(row.arrivalTime || '') + '" data-ob-action="row-field" data-ob-index="' + item.index + '" data-ob-field="arrivalTime" data-ob-focus="eta:' + item.index + '" placeholder="ETA" aria-label="Ώρα άφιξης">';
     var noteInput = item.extra
       ? '<input class="ob-input ob-row-note" value="' + esc(freeNoteText(note)) + '" data-ob-action="clean-field" data-ob-key="' + encoded(item.key) + '" data-ob-field="comments" data-ob-focus="note:' + esc(item.key) + '" placeholder="Σημείωση…">'
       : '<input class="ob-input ob-row-note" value="' + esc(freeNoteText(note)) + '" data-ob-action="comment" data-ob-index="' + item.index + '"' + keyAttr + ' data-ob-focus="note:' + item.index + '" placeholder="Σημείωση…">';
@@ -609,7 +627,7 @@
     var menuOpen = state.menuFor === id;
     var actions = item.extra
       ? ''
-      : '<button type="button" class="ob-rowmenu-btn" data-ob-action="row-menu" data-ob-id="' + encoded(id) + '" title="Ενέργειες γραμμής" aria-label="Ενέργειες γραμμής">⋯</button>' +
+      : '<button type="button" class="ob-rowmenu-btn" data-ob-action="row-menu" data-ob-id="' + encoded(id) + '" aria-label="Ενέργειες γραμμής">⋯</button>' +
         (menuOpen ? rowMenuHtml(item) : '');
 
     return '<tr class="ob-dispatch-row ' + statusClass + ' ' + toneClass + (selected ? ' selected' : '') + '" data-ob-id="' + encoded(id) + '">' +
@@ -677,7 +695,7 @@
       '<button class="ob-btn ob-square" data-ob-action="page" data-ob-page="' + (page - 1) + '"' + (page <= 1 || all ? ' disabled' : '') + ' aria-label="Προηγούμενη σελίδα">←</button>' +
       '<b>' + (all ? 'Showing all' : ('Page ' + page + ' / ' + pageCount)) + '</b>' +
       '<button class="ob-btn ob-square" data-ob-action="page" data-ob-page="' + (page + 1) + '"' + (page >= pageCount || all ? ' disabled' : '') + ' aria-label="Επόμενη σελίδα">→</button>' +
-      '<select class="ob-select" data-ob-action="page-size" title="Rows shown in the table">' +
+      '<select class="ob-select" data-ob-action="page-size" aria-label="Rows shown in the table">' +
       '<option value="0"' + (all ? ' selected' : '') + '>Fit all rows</option>' +
       '<option value="25"' + (state.pageSize === 25 ? ' selected' : '') + '>25 rows</option>' +
       '<option value="50"' + (state.pageSize === 50 ? ' selected' : '') + '>50 rows</option>' +
@@ -686,7 +704,7 @@
   }
 
   function colorLegendHtml() {
-    return '<div class="ob-tone-legend" title="Reservation color coding">' +
+    return '<div class="ob-tone-legend" aria-label="Reservation color coding">' +
       '<span class="ob-tone-lg"><i class="tone-hot"></i>Priority / late / sofa</span>' +
       '<span class="ob-tone-lg"><i class="tone-warn"></i>Unassigned / CI unknown</span>' +
       '<span class="ob-tone-lg"><i class="tone-same"></i>Same-day / Early</span>' +
@@ -737,7 +755,7 @@
       }
       html += '<label class="ob-task' + (task.completed ? ' ob-task-done' : '') + '"><input type="checkbox" data-ob-action="task-toggle" data-ob-id="' + esc(task.id) + '"' + (task.completed ? ' checked' : '') + '>' +
         '<span>' + (apt ? '<b>' + esc(apt) + ':</b> ' : '') + esc(task.text) + '</span>' +
-        '<button type="button" data-ob-action="task-delete" data-ob-id="' + esc(task.id) + '" title="Διαγραφή">×</button></label>';
+        '<button type="button" data-ob-action="task-delete" data-ob-id="' + esc(task.id) + '" aria-label="Διαγραφή">×</button></label>';
     });
     html += '<span class="ob-spacer"></span>';
     if (!state.composer) html += '<button class="ob-btn ob-sm" data-ob-action="task-open">+ Add task</button>';
@@ -778,7 +796,7 @@
       html += '<div class="ob-staff-row">' + personSelect(block, i, String(values[i] || ''));
       if (leave) {
         var days = Number(((extra.adeiesDur || {})[i]) || 1);
-        html += '<input class="ob-input" style="width:52px;flex:0 0 52px" type="number" min="1" max="30" value="' + days + '" data-ob-action="leave-days" data-ob-index="' + i + '" data-ob-focus="leave:' + i + '" title="Ημέρες άδειας">';
+        html += '<input class="ob-input" style="width:52px;flex:0 0 52px" type="number" min="1" max="30" value="' + days + '" data-ob-action="leave-days" data-ob-index="' + i + '" data-ob-focus="leave:' + i + '" aria-label="Ημέρες άδειας">';
       }
       html += '</div>';
     }
@@ -921,26 +939,26 @@
     var menu = state.barMenu
       ? '<div class="ob-menu">' +
           '<h6>Κοινοποίηση</h6>' +
-          '<button type="button" data-ob-action="ops-image">📋 Ops image</button>' +
-          '<button type="button" data-ob-action="cleaner-image">🧹 Cleaner image</button>' +
-          '<button type="button" data-ob-action="copy-list">📝 Αντιγραφή λίστας (κείμενο)</button>' +
+          menuItemHtml('data-ob-action="ops-image"', '📋', 'Ops image', false) +
+          menuItemHtml('data-ob-action="cleaner-image"', '🧹', 'Cleaner image', false) +
+          menuItemHtml('data-ob-action="copy-list"', '📝', 'Αντιγραφή λίστας (κείμενο)', false) +
           '<hr>' +
           '<h6>Πρόγραμμα</h6>' +
-          '<button type="button" data-ob-action="schedule-check">📸 Check schedule</button>' +
-          '<button type="button" data-ob-action="manage-cleaners">🧑‍🤝‍🧑 Καθαρίστριες</button>' +
+          menuItemHtml('data-ob-action="schedule-check"', '📸', 'Check schedule', false) +
+          menuItemHtml('data-ob-action="manage-cleaners"', '🧑‍🤝‍🧑', 'Καθαρίστριες', false) +
           '<hr>' +
-          '<button type="button" class="ob-danger" data-ob-action="restart">Restart ✓ (μηδενισμός)</button>' +
+          menuItemHtml('data-ob-action="restart"', '↺', 'Restart ✓ (μηδενισμός)', false, 'ob-danger') +
         '</div>'
       : '';
     return '<div class="ob-command">' +
       '<div class="ob-title"><span class="ob-title-mark">OPS</span><b>Daily Ops</b></div>' +
       '<div class="ob-datenav">' +
-        '<button class="ob-btn ob-square" data-ob-action="nav" data-ob-days="-1" title="Προηγούμενη ημέρα" aria-label="Προηγούμενη ημέρα">←</button>' +
+        '<button class="ob-btn ob-square" data-ob-action="nav" data-ob-days="-1" aria-label="Προηγούμενη ημέρα">←</button>' +
         '<button class="ob-btn' + (isToday ? ' ob-primary' : '') + '" data-ob-action="today">Today</button>' +
-        '<button class="ob-btn ob-square" data-ob-action="nav" data-ob-days="1" title="Επόμενη ημέρα" aria-label="Επόμενη ημέρα">→</button>' +
+        '<button class="ob-btn ob-square" data-ob-action="nav" data-ob-days="1" aria-label="Επόμενη ημέρα">→</button>' +
       '</div>' +
       '<input class="ob-input ob-date" type="date" value="' + esc(_opsDate) + '" data-ob-action="date" data-ob-focus="date">' +
-      '<div class="ob-ring" title="' + pct + '% καθαρισμένα">' +
+      '<div class="ob-ring" aria-label="' + pct + '% καθαρισμένα">' +
         '<svg width="34" height="34"><circle cx="17" cy="17" r="14" fill="none" stroke="#e8ecf1" stroke-width="4"></circle>' +
         '<circle cx="17" cy="17" r="14" fill="none" stroke="#15764c" stroke-width="4" stroke-linecap="round" stroke-dasharray="' + dash + '" stroke-dashoffset="' + offset + '"></circle></svg>' +
         '<b>' + pct + '%</b></div>' +
@@ -952,7 +970,7 @@
       '</div>' +
       '<span class="ob-spacer"></span>' +
       '<span class="ob-save-state"><i></i><span id="ops-beta-save-state">Auto-save on</span></span>' +
-      '<button class="ob-btn ob-hide-sm" data-ob-action="manage-cleaners" title="Add or remove cleaners">Καθαρίστριες</button>' +
+      '<button class="ob-btn ob-hide-sm" data-ob-action="manage-cleaners">Καθαρίστριες</button>' +
       '<div class="ob-menu-host">' +
         '<button class="ob-btn ob-primary" data-ob-action="bar-menu">Κοινοποίηση ▾</button>' + menu +
       '</div>' +
@@ -970,16 +988,18 @@
       ['done', 'Done', cleanDay.done, 'ob-d-ok'],
     ];
     var filters = segs.map(function (seg) {
-      // The plain "Label N" title doubles as the accessible name for the pill.
+      // The pill already reads "Label N" on screen, so a title= would only
+      // duplicate it as a native tooltip. aria-label carries the same string
+      // for assistive tech (and for the tests) without the hover popup.
       var plain = seg[1] + ' ' + seg[2];
       return '<button class="ob-filter' + (state.filter === seg[0] ? ' on' : '') + (seg[0] === 'attention' ? ' ob-blocking' : '') +
-        '" data-ob-action="filter" data-ob-filter="' + seg[0] + '" title="' + esc(plain) + '" aria-label="' + esc(plain) + '">' +
+        '" data-ob-action="filter" data-ob-filter="' + seg[0] + '" aria-label="' + esc(plain) + '">' +
         (seg[3] ? '<i class="' + seg[3] + '"></i>' : '') + esc(seg[1]) + ' <em>' + seg[2] + '</em></button>';
     }).join('');
     return '<div class="ob-rail"><div class="ob-segs">' + filters + '</div>' +
       '<div class="ob-railtools">' +
-        '<input class="ob-input ob-search" value="' + esc(state.search) + '" data-ob-action="search" data-ob-focus="search" placeholder="Search apartment, cleaner or comment…">' +
-        '<select class="ob-select" data-ob-action="group" title="Ομαδοποίηση">' +
+        '<input class="ob-input ob-search" value="' + esc(state.search) + '" data-ob-action="search" data-ob-focus="search" placeholder="Search apartment, cleaner or comment…" aria-label="Search apartment, cleaner or comment">' +
+        '<select class="ob-select" data-ob-action="group" aria-label="Ομαδοποίηση">' +
           '<option value="area"' + (state.group === 'area' ? ' selected' : '') + '>Group: area</option>' +
           '<option value="cleaner"' + (state.group === 'cleaner' ? ' selected' : '') + '>Group: cleaner</option>' +
           '<option value="none"' + (state.group === 'none' ? ' selected' : '') + '>Group: none</option>' +
@@ -1070,11 +1090,11 @@
           colorLegendHtml() +
           '<div class="ob-dispatch-layout"><div class="ob-dispatch-main">' +
             '<div class="ob-table-wrap"><table class="ob-dispatch-table"><thead><tr>' +
-              '<th class="ob-c-sel ob-center"><input type="checkbox" class="ob-sel-check" data-ob-action="select-page"' + (pageAllSelected ? ' checked' : '') + ' title="Select this page" aria-label="Select this page"></th>' +
+              '<th class="ob-c-sel ob-center"><input type="checkbox" class="ob-sel-check" data-ob-action="select-page"' + (pageAllSelected ? ' checked' : '') + ' aria-label="Select this page"></th>' +
               '<th class="ob-c-tick ob-center">✓</th>' +
               '<th class="ob-c-prop">Property</th>' +
               '<th class="ob-c-stay">Stay / check-in</th>' +
-              '<th class="ob-c-sig" title="⏰ Late checkout · ❗ Priority · 👶 Παρκοκρεβάτο · ☀️ Early check-in">Signals</th>' +
+              '<th class="ob-c-sig">Signals</th>' +
               '<th class="ob-c-crew">Cleaner</th>' +
               '<th class="ob-c-task">Task</th>' +
               '<th class="ob-c-note">Notes</th>' +
@@ -1337,14 +1357,41 @@
     });
   }
 
+  // Removal defers to the host's opsRemoveRow when it exists so the beta board
+  // and the legacy board delete rows through exactly one code path (it owns the
+  // confirm, the splice and the autosave). It reports nothing back, so the
+  // array length before/after is what tells us whether the operator confirmed.
   function removeRow(index) {
-    if (!_opsRows[index]) return;
-    if (!window.confirm('Remove this row from the selected day?')) return;
-    _opsRows.splice(index, 1);
+    var row = _opsRows[index];
+    if (!row) return false;
+    var before = _opsRows.length;
+    if (typeof opsRemoveRow === 'function') {
+      opsRemoveRow(index);
+    } else {
+      var name = row.aptName || 'this property';
+      if (!window.confirm('Remove ' + name + " from today's list?")) return false;
+      _opsRows.splice(index, 1);
+      persist(true);
+    }
+    if (_opsRows.length === before) return false;
+    // The row is gone from _opsRows but still in the day snapshot until we
+    // persist, and _opsLoadData would rebuild it straight back from the live
+    // bookings — so write the shortened list out and repaint from it.
+    forgetSelection(row);
     closeOverlays();
     persist(true);
     state.skipReload = true;
     rerender();
+    return true;
+  }
+
+  // A removed row must not keep a phantom entry in the bulk selection.
+  function forgetSelection(row) {
+    var target = (typeof _opsCleanTarget === 'function') ? _opsCleanTarget(row) : row;
+    var key = (target && typeof _opsCleanStorageKey === 'function') ? _opsCleanStorageKey(target) : '';
+    Object.keys(state.selected).forEach(function (id) {
+      if (key && id.indexOf(key) >= 0) delete state.selected[id];
+    });
   }
 
   // ── tasks (inline composer — no window.prompt) ───────────────────────────
