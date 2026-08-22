@@ -6,10 +6,12 @@ This repository (`lete13/utilization-heatmap`) is a **sandbox mirror** of [`lete
 
 ### Workflow
 
-**Never commit, push, or merge to `main`.** This is a hard rule from the repository owner. Agents must always work on a feature branch (e.g. `cursor/my-change-5c94`), push that branch, and open a pull request. Merging to `main` is the owner's decision alone — do not merge a PR, even after tests pass, unless the owner explicitly asks for that specific merge.
+**Never push to `lete13/elysian-clearing`.** That repo is production and is strictly read-only for agents: fetch from it, never write to it. Promoting work there is the owner's decision, done manually.
 
-- **Develop here** → commit/push to a **feature branch** on `utilization-heatmap`, then open a PR and stop
-- **Promote to production** → cherry-pick or open a PR from heatmap into `elysian-clearing`, or manually port the diff
+Within this sandbox repo, working on a feature branch (e.g. `cursor/my-change-5c94`) and **merging into `utilization-heatmap` `main` is allowed**.
+
+- **Develop here** → feature branch → PR → merge into heatmap `main`
+- **Promote to production** → the owner ports the diff to `elysian-clearing`; agents do not push there
 
 ### Auto-sync from `elysian-clearing` main
 
