@@ -6,7 +6,9 @@ This repository (`lete13/utilization-heatmap`) is a **sandbox mirror** of [`lete
 
 ### Workflow
 
-- **Develop here** → commit/push to `utilization-heatmap` (use **feature branches** for experiments; `main` is auto-synced from upstream)
+**Never commit, push, or merge to `main`.** This is a hard rule from the repository owner. Agents must always work on a feature branch (e.g. `cursor/my-change-5c94`), push that branch, and open a pull request. Merging to `main` is the owner's decision alone — do not merge a PR, even after tests pass, unless the owner explicitly asks for that specific merge.
+
+- **Develop here** → commit/push to a **feature branch** on `utilization-heatmap`, then open a PR and stop
 - **Promote to production** → cherry-pick or open a PR from heatmap into `elysian-clearing`, or manually port the diff
 
 ### Auto-sync from `elysian-clearing` main
@@ -17,9 +19,9 @@ Upstream changes arrive as a **reviewable pull request**, never as a force-push.
 - **Manual** — Actions → “Sync from elysian-clearing” → Run workflow
 - **Instant (optional)** — add `docs/elysian-clearing-sync-trigger.yml.example` to `elysian-clearing` with a `HEATMAP_SYNC_TOKEN` secret
 
-The job **never writes to `main`**, so sandbox-only work committed here is safe. Merge the sync PR when you want upstream changes; a file changed both upstream and here (e.g. `fe/daily-ops-beta.js`) surfaces as a normal merge conflict instead of being silently discarded.
+The job **never writes to `main`**, so work already on `main` is not overwritten by a sync. Merge the sync PR when you want upstream changes; a file changed both upstream and here (e.g. `fe/daily-ops-beta.js`) surfaces as a normal merge conflict instead of being silently discarded.
 
-Because of this, committing sandbox work to `main` is safe. `sync/elysian-clearing` is machine-managed — never commit to it.
+`sync/elysian-clearing` is machine-managed and force-updated — never commit to it. Sync PRs are still the owner's to merge.
 
 ### Running locally (single Node/Express app + PostgreSQL)
 
