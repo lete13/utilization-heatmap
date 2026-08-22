@@ -1,13 +1,13 @@
 'use strict';
 /**
- * Build srv/patches-103.json: Platform Invoices agent hardening.
+ * Build srv/patches-105.json: Platform Invoices agent hardening.
  * - one agent/pull per month (single-flight, no duplicate Chromium workers)
  * - a failed/cancelled leftover Airbnb pull blocks the send (force overrides)
- * - agent mail loop respects EMAIL_MAX_BYTES and persists who was already
- *   emailed when a send fails mid-loop, so a retry never re-sends a pack
+ * - agent persists who was already emailed when a send fails mid-loop, so a
+ *   retry never re-sends a pack (oversized packs are handled upstream by
+ *   patches-103's chunkAttachments part 1/N emails)
  * - a stored empty accountant list stays empty (no default resurrection),
  *   and the leased send no longer falls back to the env default addresses
- * - Ship per-card loop skips an oversized card instead of aborting mid-loop
  * - piExecutePullJob resolves its promise on every exit path (a cancelled
  *   pull used to leave the awaiting agent hung at status running forever)
  * - booking-zip dedupe keys on the zip entry name from stored meta and on
@@ -40,7 +40,7 @@ function applySrv(untilName) {
   return src;
 }
 
-const src = applySrv('patches-103.json');
+const src = applySrv('patches-105.json');
 
 const patches = [];
 
@@ -65,19 +65,6 @@ patches.push({
     "      return res.status(400).json({ error: 'No accountant cards configured — add cards under Accountants before shipping' });\n" +
     '    }\n' +
     "    if (!to.length && !(scope === 'leased' && accountantCards.length)) return res.status(400).json({ error: 'No recipient (set accountant cards or to=)' });",
-  count: 1,
-});
-
-patches.push({
-  note: 'Ship skips an oversized card instead of aborting after earlier sends',
-  find:
-    "        if (!mailAtts.length) { skipped.push({ email: c.email, reason: 'no attachments' }); continue; }\n" +
-    "        if (bytes > EMAIL_MAX_BYTES) return res.status(413).json({ error: 'Pack too large for one email' });\n" +
-    "        const info = await piSendAccountantMail(c.email, b.subject || label, b.text || ('Attached platform invoices for ' + month + '\\n'), mailAtts);",
-  replace:
-    "        if (!mailAtts.length) { skipped.push({ email: c.email, reason: 'no attachments' }); continue; }\n" +
-    "        if (bytes > EMAIL_MAX_BYTES) { skipped.push({ email: c.email, reason: 'pack too large for one email (' + Math.round(bytes / 1048576) + ' MB > 20 MB)' }); continue; }\n" +
-    "        const info = await piSendAccountantMail(c.email, b.subject || label, b.text || ('Attached platform invoices for ' + month + '\\n'), mailAtts);",
   count: 1,
 });
 
@@ -122,7 +109,7 @@ patches.push({
 });
 
 patches.push({
-  note: 'Agent send: pull failure blocks, size cap per card, partial-send persisted',
+  note: 'Agent send: pull failure blocks, partial send persisted for safe retries',
   find:
     '      const cards = await piLoadAccountants();\n' +
     '      const emailPlan = piAgent.planAccountantEmails(cards, b.force ? Object.assign({}, pack, { blocked: false }) : pack);\n' +
@@ -143,8 +130,12 @@ patches.push({
     '            }\n' +
     '          }\n' +
     '          if (!mailAtts.length) continue;\n' +
-    "          await piSendAccountantMail(c.email, 'PLATFORM INVOICES ' + month, 'Platform invoice pack for ' + month + '.\\n', mailAtts);\n" +
-    '          emailed.push({ email: c.email, pdfs: !!c.attachPdfs, excel: !!c.attachExcel, rows: sub.pdfRows.length });\n' +
+    '          const aChunks = piAgent.chunkAttachments(mailAtts);\n' +
+    '          for (let ai = 0; ai < aChunks.length; ai++) {\n' +
+    "            const aPart = aChunks.length > 1 ? (' (part ' + (ai + 1) + '/' + aChunks.length + ')') : '';\n" +
+    "            await piSendAccountantMail(c.email, 'PLATFORM INVOICES ' + month + aPart, 'Platform invoice pack for ' + month + aPart + '.\\n', aChunks[ai]);\n" +
+    '          }\n' +
+    '          emailed.push({ email: c.email, pdfs: !!c.attachPdfs, excel: !!c.attachExcel, rows: sub.pdfRows.length, emails: aChunks.length });\n' +
     '        }\n' +
     '        report.emailed = emailed;\n' +
     "        report.status = 'sent';\n" +
@@ -172,19 +163,19 @@ patches.push({
     '            const sub = piAgent.packForCard(pack, c);\n' +
     "            if (sub.empty) { report.skipped.push({ id: c.id, email: c.email, reason: 'no_rows_for_listed_apartments' }); continue; }\n" +
     '            const mailAtts = [];\n' +
-    '            let mailBytes = 0;\n' +
-    "            if (c.attachExcel && sub.xlsBuf) { mailAtts.push({ filename: sub.xlsName, content: sub.xlsBuf, contentType: 'application/vnd.ms-excel' }); mailBytes += sub.xlsBuf.length; }\n" +
+    "            if (c.attachExcel && sub.xlsBuf) mailAtts.push({ filename: sub.xlsName, content: sub.xlsBuf, contentType: 'application/vnd.ms-excel' });\n" +
     '            if (c.attachPdfs) {\n' +
     '              for (const r of sub.pdfRows) {\n' +
-    "                const pdfBuf = Buffer.from(r.data, 'base64');\n" +
-    '                mailBytes += pdfBuf.length;\n' +
-    "                mailAtts.push({ filename: r.filename || (r.channel + '.pdf'), content: pdfBuf, contentType: r.mime || 'application/pdf' });\n" +
+    "                mailAtts.push({ filename: r.filename || (r.channel + '.pdf'), content: Buffer.from(r.data, 'base64'), contentType: r.mime || 'application/pdf' });\n" +
     '              }\n' +
     '            }\n' +
     '            if (!mailAtts.length) continue;\n' +
-    "            if (mailBytes > EMAIL_MAX_BYTES) { report.skipped.push({ id: c.id, email: c.email, reason: 'pack_too_large_for_one_email' }); continue; }\n" +
-    "            await piSendAccountantMail(c.email, 'PLATFORM INVOICES ' + month, 'Platform invoice pack for ' + month + '.\\n', mailAtts);\n" +
-    '            emailed.push({ email: c.email, pdfs: !!c.attachPdfs, excel: !!c.attachExcel, rows: sub.pdfRows.length });\n' +
+    '            const aChunks = piAgent.chunkAttachments(mailAtts);\n' +
+    '            for (let ai = 0; ai < aChunks.length; ai++) {\n' +
+    "              const aPart = aChunks.length > 1 ? (' (part ' + (ai + 1) + '/' + aChunks.length + ')') : '';\n" +
+    "              await piSendAccountantMail(c.email, 'PLATFORM INVOICES ' + month + aPart, 'Platform invoice pack for ' + month + aPart + '.\\n', aChunks[ai]);\n" +
+    '            }\n' +
+    '            emailed.push({ email: c.email, pdfs: !!c.attachPdfs, excel: !!c.attachExcel, rows: sub.pdfRows.length, emails: aChunks.length });\n' +
     '          }\n' +
     "          report.status = 'sent';\n" +
     '        } catch (eSend) {\n' +
@@ -313,7 +304,6 @@ const cfg = {
     { has: "res.status(409).json({ error: 'Agent already running for '", note: 'agent single-flight' },
     { has: 'leftover.pullStatus = pullJob.status', note: 'pull failure recorded' },
     { has: 'const sendBlocked = (pack.blocked || pullFailed) && !b.force;', note: 'pull failure blocks send' },
-    { has: 'mailBytes > EMAIL_MAX_BYTES', note: 'agent mail size cap' },
     { has: "report.status = emailed.length ? 'partial' : 'error';", note: 'partial send persisted' },
     { has: 'if (parsed) return parsed;', note: 'empty accountant list honored' },
     { has: 'resolvePull();\n          return;', note: 'cancel path resolves pull promise' },
@@ -321,5 +311,5 @@ const cfg = {
   ],
 };
 
-fs.writeFileSync(path.join(root, 'srv', 'patches-103.json'), JSON.stringify(cfg, null, 1) + '\n');
-console.log('wrote srv/patches-103.json', cfg.expectedSha256);
+fs.writeFileSync(path.join(root, 'srv', 'patches-105.json'), JSON.stringify(cfg, null, 1) + '\n');
+console.log('wrote srv/patches-105.json', cfg.expectedSha256);

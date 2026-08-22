@@ -146,6 +146,17 @@ const votsalaRows = agent.packRowsForCard(
 );
 assert.strictEqual(votsalaRows.length, 1, 'Votsala unit matches the shared Votsala Booking folder');
 
+// Attachment chunking: big packs split into several emails.
+const mb = (n) => ({ filename: n + '.pdf', content: Buffer.alloc(5 * 1024 * 1024) });
+const chunks = agent.chunkAttachments([mb('a'), mb('b'), mb('c'), mb('d'), mb('e')], 12 * 1024 * 1024);
+assert.strictEqual(chunks.length, 3, '25MB in 5MB files → 3 emails at 12MB budget');
+assert.strictEqual(chunks[0].length, 2);
+assert.strictEqual(chunks[2].length, 1);
+const oversize = agent.chunkAttachments([{ filename: 'big.pdf', content: Buffer.alloc(20 * 1024 * 1024) }, mb('x')], 12 * 1024 * 1024);
+assert.strictEqual(oversize.length, 2, 'single oversize attachment gets its own email');
+assert.strictEqual(agent.chunkAttachments([], 1000).length, 0);
+assert.strictEqual(agent.chunkAttachments([mb('one')]).length, 1, 'small pack stays one email');
+
 const cards = accountants.seedFromEnv('');
 assert.strictEqual(cards.length, 2);
 assert(cards.every((c) => c.receivePdfs && c.receiveExcel));
@@ -226,15 +237,19 @@ assert(fe139.patches.some((p) => (p.replace || '').includes('piToggleFold')), 'F
 assert(fe139.patches.some((p) => (p.replace || '').includes('piFoldAll')), 'FE collapse/expand all');
 assert(fe139.patches.some((p) => (p.replace || '').includes('piShipAnyway')), 'FE ship-anyway override');
 const srv103 = JSON.parse(fs.readFileSync(path.join(root, 'srv', 'patches-103.json'), 'utf8'));
-assert.strictEqual(srv103.baseSha256, srv102.expectedSha256, 'SRV 103 continues SRV 102');
-assert(srv103.patches.some((p) => (p.replace || '').includes("'Agent already running for '")), 'SRV agent single-flight');
-assert(srv103.patches.some((p) => (p.replace || '').includes('leftover.pullStatus = pullJob.status')), 'SRV records a failed/cancelled leftover pull');
-assert(srv103.patches.some((p) => (p.replace || '').includes('const sendBlocked = (pack.blocked || pullFailed) && !b.force;')), 'SRV failed pull blocks the send');
-assert(srv103.patches.some((p) => (p.replace || '').includes('mailBytes > EMAIL_MAX_BYTES')), 'SRV agent mail respects the size cap');
-assert(srv103.patches.some((p) => (p.replace || '').includes("report.status = emailed.length ? 'partial' : 'error';")), 'SRV persists who was emailed on a mid-loop failure');
-assert(srv103.patches.some((p) => (p.replace || '').includes('if (parsed) return parsed;')), 'SRV honors a stored empty accountant list');
-assert(srv103.patches.filter((p) => (p.replace || '').includes('resolvePull();')).length >= 3, 'SRV pull promise resolves on cancel/error/spawn-fail paths');
-assert(srv103.patches.some((p) => (p.replace || '').includes('legacyKey')), 'SRV zip dedupe matches pre-hash filenames');
+assert(srv103.patches.some((p) => (p.replace || '').includes('piAgent.chunkAttachments(mailAtts)')), 'SRV chunks oversized packs');
+assert(srv103.patches.every((p) => !(p.replace || '').includes('Pack too large')), 'SRV 413 removed');
+const srv104 = JSON.parse(fs.readFileSync(path.join(root, 'srv', 'patches-104.json'), 'utf8'));
+assert(srv104.patches.some((p) => (p.replace || '').includes('planAccountantEmails(accountantCards, b.force')), 'SRV forced manual send reaches the card plan');
+const srv105 = JSON.parse(fs.readFileSync(path.join(root, 'srv', 'patches-105.json'), 'utf8'));
+assert.strictEqual(srv105.baseSha256, srv104.expectedSha256, 'SRV 105 continues SRV 104');
+assert(srv105.patches.some((p) => (p.replace || '').includes("'Agent already running for '")), 'SRV agent single-flight');
+assert(srv105.patches.some((p) => (p.replace || '').includes('leftover.pullStatus = pullJob.status')), 'SRV records a failed/cancelled leftover pull');
+assert(srv105.patches.some((p) => (p.replace || '').includes('const sendBlocked = (pack.blocked || pullFailed) && !b.force;')), 'SRV failed pull blocks the send');
+assert(srv105.patches.some((p) => (p.replace || '').includes("report.status = emailed.length ? 'partial' : 'error';")), 'SRV persists who was emailed on a mid-loop failure');
+assert(srv105.patches.some((p) => (p.replace || '').includes('if (parsed) return parsed;')), 'SRV honors a stored empty accountant list');
+assert(srv105.patches.filter((p) => (p.replace || '').includes('resolvePull();')).length >= 3, 'SRV pull promise resolves on cancel/error/spawn-fail paths');
+assert(srv105.patches.some((p) => (p.replace || '').includes('legacyKey')), 'SRV zip dedupe matches pre-hash filenames');
 const fe140 = JSON.parse(fs.readFileSync(path.join(root, 'fe', 'patches-140.json'), 'utf8'));
 assert.strictEqual(fe140.baseSha256, fe139.expectedSha256, 'FE 140 continues FE 139');
 assert(fe140.patches.some((p) => (p.replace || '').includes("replace(/</g, '&lt;')")), 'FE escapes the legacy accountant card title');
