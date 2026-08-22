@@ -247,4 +247,277 @@ context._opsBetaState.filter = 'all';
 context.renderOps();
 assert(panel.innerHTML.includes('Arrival Studio'), 'All filter still shows arrival-only rows');
 
-console.log('daily-ops-beta-scale: ok (promoted #tab-ops + note colors + chips + fit-all + urgency + arrival filters)');
+// ── dispatch console redesign ───────────────────────────────────────────────
+
+// The triage rail must discriminate, not just restate "all". Every segment
+// carries a plain "Label N" accessible name so counts are assertable.
+['all', 'attention', 'unknown', 'open', 'unassigned', 'done'].forEach((key) => {
+  assert(
+    panel.innerHTML.includes('data-ob-filter="' + key + '"'),
+    'triage rail keeps the ' + key + ' segment'
+  );
+});
+assert(panel.innerHTML.includes('Blocking'), 'rail exposes a Blocking segment');
+assert(panel.innerHTML.includes('Unknown check-in'), 'rail exposes an Unknown check-in segment');
+
+const railCount = (label) => {
+  const hit = panel.innerHTML.match(new RegExp('aria-label="' + label + ' (\\d+)"'));
+  return hit ? Number(hit[1]) : -1;
+};
+const blocking = railCount('Blocking');
+const openCount = railCount('Open');
+const allCount = railCount('All');
+assert(blocking > 0 && openCount > 0 && allCount > 0, 'rail segments carry live counts');
+assert(blocking < openCount, 'Blocking is narrower than Open (segment actually discriminates)');
+assert(openCount < allCount, 'Open is narrower than All');
+
+// Done work never blocks, and neither does a row that already has a crew.
+assert(
+  blocking <= allCount - railCount('Done'),
+  'finished rows are excluded from Blocking'
+);
+
+// Grouping: "default" sort means source order, so it must never regroup.
+assert(!panel.innerHTML.includes('ob-grp'), 'default sort renders an ungrouped board');
+context._opsBetaState.sort = 'status';
+context.renderOps();
+assert(panel.innerHTML.includes('ob-grp'), 'status sort renders grouped sections');
+assert(panel.innerHTML.includes('ακίνητα'), 'group headers summarise their section');
+const groupCount = (panel.innerHTML.match(/class="ob-grp"/g) || []).length;
+assert(groupCount >= 2, 'area grouping produces more than one section');
+assert(
+  (panel.innerHTML.match(/class="ob-dispatch-row/g) || []).length > groupCount,
+  'group header rows are not counted as dispatch rows'
+);
+context._opsBetaState.group = 'none';
+context.renderOps();
+assert(!panel.innerHTML.includes('ob-grp'), 'grouping can be switched off');
+context._opsBetaState.group = 'area';
+context._opsBetaState.sort = 'default';
+context.renderOps();
+
+// Row ⋯ menu restores the kind override and remove-row parity gaps.
+const rowId = (panel.innerHTML.match(/<tr class="ob-dispatch-row[^>]*data-ob-id="([^"]+)"/) || [])[1];
+assert(rowId, 'dispatch rows carry a stable id');
+assert(panel.innerHTML.includes('data-ob-action="row-menu"'), 'rows expose an actions menu');
+listeners.click(event('row-menu', { dataset: { obAction: 'row-menu', obId: rowId } }));
+assert(panel.innerHTML.includes('data-ob-action="kind"'), 'row menu restores the kind override');
+assert(panel.innerHTML.includes('data-ob-action="row-remove"'), 'row menu restores remove row');
+assert(/data-ob-action="flag"[^>]*data-ob-flag="park"/.test(panel.innerHTML), 'row menu can set an inactive flag');
+listeners.click(event('row-menu', { dataset: { obAction: 'row-menu', obId: rowId } }));
+assert(!panel.innerHTML.includes('data-ob-action="row-remove"'), 'row menu closes again');
+
+// Cleaner assignment is the primary board action: a workload-aware popover.
+assert(panel.innerHTML.includes('data-ob-action="assign-open"'), 'rows expose an assign control');
+listeners.click(event('assign-open', { dataset: { obAction: 'assign-open', obId: rowId } }));
+assert(panel.innerHTML.includes('ob-pop'), 'assign popover renders');
+assert(panel.innerHTML.includes('data-ob-action="assign-pick"'), 'assign popover offers the roster');
+assert(panel.innerHTML.includes('ob-ld'), 'assign popover shows per-cleaner workload');
+listeners.click(event('assign-open', { dataset: { obAction: 'assign-open', obId: rowId } }));
+
+// Contextual bulk bar: idle affordance until something is selected.
+listeners.click(event('clear-selection'));
+assert(panel.innerHTML.includes('ob-bulk-idle'), 'bulk bar is idle with an empty selection');
+listeners.change(event('select-page', { checked: true }));
+assert(panel.innerHTML.includes('ob-bulk active'), 'bulk bar activates on selection');
+assert(/data-ob-action="select-page"[^>]*checked/.test(panel.innerHTML), 'page checkbox reflects the selection after rerender');
+listeners.click(event('clear-selection'));
+assert(panel.innerHTML.includes('ob-bulk-idle'), 'clearing the selection restores the idle bar');
+
+// Restored parity: schedule-check mount, plain-text copy list, no window.prompt.
+assert(panel.innerHTML.includes('id="ops-schedcheck"'), 'schedule-check OCR panel has a mount point');
+listeners.click(event('bar-menu'));
+assert(panel.innerHTML.includes('data-ob-action="copy-list"'), 'plain-text copy list is exposed');
+assert(panel.innerHTML.includes('data-ob-action="ops-image"'), 'Ops image export is exposed');
+assert(panel.innerHTML.includes('data-ob-action="cleaner-image"'), 'cleaner image export is exposed');
+assert(panel.innerHTML.includes('data-ob-action="schedule-check"'), 'schedule check upload is exposed');
+assert(panel.innerHTML.includes('data-ob-action="restart"'), 'restart cleans is exposed');
+listeners.click(event('bar-menu'));
+
+// Inline task composer replaces the old window.prompt() flow.
+listeners.click(event('task-open'));
+assert(panel.innerHTML.includes('ob-composer'), 'inline task composer renders');
+assert(panel.innerHTML.includes('data-ob-action="task-text"'), 'composer has a text field');
+assert(panel.innerHTML.includes('data-ob-action="task-apt"'), 'composer can attach an apartment');
+assert(panel.innerHTML.includes('data-ob-action="task-save"'), 'composer can save');
+listeners.click(event('task-cancel'));
+
+// Every capability the board exposed before must still be reachable.
+[
+  'nav', 'today', 'date', 'filter', 'sort', 'search', 'page', 'page-size',
+  'select', 'select-page', 'select-all-results', 'clear-selection',
+  'bulk-cleaner', 'bulk-task', 'bulk-done', 'bulk-open',
+  'clean', 'checkin', 'flag', 'row-field', 'comment', 'clean-field',
+  'cleaner-add', 'cleaner-remove', 'manage-cleaners',
+  'task-toggle', 'task-delete', 'staff', 'staff-add', 'leave-days',
+  'route-add', 'route-remove', 'notes', 'schedule-file', 'group',
+].forEach((action) => {
+  assert(
+    betaJs.includes('data-ob-action="' + action + '"'),
+    'feature preserved: ' + action
+  );
+});
+assert(!/window\.prompt\(/.test(betaJs), 'task creation no longer uses window.prompt');
+
+// Scroll + focus survival across a full innerHTML swap.
+assert(betaJs.includes('captureContext') && betaJs.includes('restoreContext'), 'render snapshots and restores UI context');
+assert(betaJs.includes('data-ob-focus'), 'focusable controls carry a stable restore key');
+assert(/typeof window\.scrollTo === 'function'/.test(betaJs), 'scroll restore is feature-detected');
+assert(/setSelectionRange/.test(betaJs), 'caret position is restored after rerender');
+assert(/if \(state\.saveTimer\) persist\(false\)/.test(betaJs), 'pending edits flush before a repaint reloads rows');
+
+// Sticky day bar / rail / table header must not sit in a scroll container.
+assert(!/ob-table-wrap\s*\{[^}]*overflow-x:\s*auto/.test(css), 'table wrap is not a horizontal scroll container');
+assert(/\.ob-command\s*\{[^}]*position:\s*sticky/.test(css), 'day command bar is sticky');
+assert(/\.ob-rail\s*\{[^}]*position:\s*sticky/.test(css), 'triage rail is sticky');
+assert(/\.ob-dispatch-table th\s*\{[^}]*position:\s*sticky/.test(css), 'column header is sticky');
+assert(/--ob-stick/.test(css), 'sticky offsets come from one shared token');
+
+// Responsive: the table collapses into cards below desktop.
+assert(/@media \(max-width: 1180px\)/.test(css), 'card breakpoint defined below desktop');
+assert(/grid-template-areas/.test(css), 'rows become cards via grid areas');
+
+// ── video-review defects ────────────────────────────────────────────────────
+
+// 1. No native tooltips. Chrome renders title= as a black popup on click, which
+// read as a debug toast ("Blocking 10", "Ενέργειες γραμμής") during review.
+// Accessible names move to aria-label, which never paints anything.
+assert(!/title="/.test(betaJs), 'no control emits a native title= tooltip');
+assert(
+  /data-ob-action="filter"[^>]*aria-label="/.test(panel.innerHTML),
+  'filter pills keep an accessible name without a tooltip'
+);
+assert(
+  !/data-ob-action="filter"[^>]*title=/.test(panel.innerHTML),
+  'clicking a filter pill pops up nothing'
+);
+assert(
+  /data-ob-action="row-menu"[^>]*aria-label="Ενέργειες γραμμής"/.test(panel.innerHTML),
+  'row actions button is labelled for assistive tech'
+);
+assert(
+  !/data-ob-action="row-menu"[^>]*title=/.test(panel.innerHTML),
+  'opening the row actions menu pops up nothing'
+);
+
+// 2. Menu rows share one three-track grid so ticked, icon-only and bare items
+// all align on the same text column.
+listeners.click(event('row-menu', { dataset: { obAction: 'row-menu', obId: rowId } }));
+const menuItems = panel.innerHTML.match(/<button type="button" class="ob-mi[^"]*"[^>]*>/g) || [];
+assert(menuItems.length >= 5, 'row menu is built from shared menu items');
+const menuHtml = panel.innerHTML.slice(panel.innerHTML.indexOf('<div class="ob-menu">'));
+['ob-mi-state', 'ob-mi-icon', 'ob-mi-label'].forEach((cls) => {
+  assert(menuHtml.includes(cls), 'menu items carry the ' + cls + ' gutter');
+});
+assert(
+  (menuHtml.match(/ob-mi-state/g) || []).length === (menuHtml.match(/ob-mi-label/g) || []).length,
+  'every menu item has both a state gutter and a label, so none can shift left'
+);
+assert(
+  /class="ob-mi[^"]*ob-danger"/.test(panel.innerHTML),
+  'the destructive item uses the same aligned shape as the rest'
+);
+assert(
+  /#tab-ops \.ob-menu button \{[^}]*grid-template-columns:\s*13px 18px 1fr/.test(css),
+  'menu gutters are fixed tracks so empty ones still reserve their width'
+);
+assert(
+  /\.ob-mi-state,\s*#tab-ops \.ob-mi-icon \{[^}]*justify-self:\s*stretch/.test(css),
+  'gutters fill their track, so glyphs of different widths cannot shift the row'
+);
+listeners.click(event('row-menu', { dataset: { obAction: 'row-menu', obId: rowId } }));
+
+// 3. The triage rail has to survive a phone. It is the sticky element there
+// (the day bar stands down), it grows instead of clipping, and the chips scroll
+// behind a shadow affordance rather than silently ending.
+assert(/@media \(max-width: 540px\)/.test(css), 'a narrow tier exists below the tablet card');
+assert(
+  /@media \(max-width: 900px\)[^@]*\.ob-rail\s*\{[^}]*height:\s*auto/.test(css),
+  'the rail grows with its content instead of clipping to a fixed height'
+);
+assert(
+  /@media \(max-width: 900px\)[^@]*\.ob-command\s*\{[^}]*position:\s*static/.test(css),
+  'the day bar stops being sticky on narrow screens'
+);
+assert(
+  /@media \(max-width: 900px\)[^@]*\.ob-rail\s*\{[^}]*top:\s*0/.test(css),
+  'the rail takes over as the pinned strip so filters stay reachable'
+);
+assert(/\.ob-segs\s*\{[^}]*overflow-x:\s*auto/.test(css), 'filter chips scroll horizontally');
+assert(
+  /\.ob-segs\s*\{[^}]*radial-gradient\(farthest-side at 100% 50%/.test(css),
+  'chips carry a scroll-shadow affordance showing there is more to reach'
+);
+assert(
+  !/@media \(max-width: 540px\)[^@]*\.ob-segs\s*\{[^}]*display:\s*none/.test(css),
+  'the rail is never hidden on a phone'
+);
+
+// 4. Mobile day bar and console header get room to breathe instead of clipping.
+assert(
+  /@media \(max-width: 900px\)[^@]*\.ob-command\s*\{[^}]*flex-wrap:\s*wrap/.test(css),
+  'the day bar wraps rather than overflowing'
+);
+assert(
+  /@media \(max-width: 900px\)[^@]*\.ob-board-head\s*\{[^}]*flex-direction:\s*column/.test(css),
+  'the dispatch console header stacks on narrow screens'
+);
+assert(
+  /@media \(max-width: 900px\)[^@]*\.ob-progress\s*\{[^}]*width:\s*100%/.test(css),
+  'the progress bar takes the full width once the header stacks'
+);
+assert(
+  /@media \(max-width: 540px\)[^@]*grid-template-columns:\s*20px 24px minmax\(0, 1fr\) auto/.test(css),
+  'the narrow card drops a track so its bands cannot overflow'
+);
+
+// 5. Remove row must actually remove the row.
+context._opsBetaState.filter = 'all';
+context._opsBetaState.pageSize = 0;
+context._opsBetaState.page = 1;
+context.renderOps();
+
+const removeTarget = rows[3];
+const removeTargetName = removeTarget.aptName;
+const beforeRemove = renderedRows();
+const beforeLength = rows.length;
+assert(panel.innerHTML.includes(removeTargetName), 'the row to remove is on the board first');
+
+// Cancelling at the confirm must change nothing.
+context.confirm = () => false;
+listeners.click(event('row-remove', { dataset: { obAction: 'row-remove', obIndex: '3' } }));
+assert.strictEqual(rows.length, beforeLength, 'declining the confirm keeps the row in the day');
+assert.strictEqual(renderedRows(), beforeRemove, 'declining the confirm leaves the board untouched');
+assert(panel.innerHTML.includes(removeTargetName), 'the row is still rendered after cancelling');
+
+// Confirming must drop it from _opsRows and from the repaint.
+context.confirm = () => true;
+listeners.click(event('row-remove', { dataset: { obAction: 'row-remove', obIndex: '3' } }));
+assert.strictEqual(rows.length, beforeLength - 1, 'confirming removes exactly one row from the day');
+assert.strictEqual(renderedRows(), beforeRemove - 1, 'the removed row is gone from the repaint');
+assert(!rows.some((row) => row.aptName === removeTargetName), 'the removed row is out of the array');
+assert(!panel.innerHTML.includes(removeTargetName), 'the removed row is off the board');
+assert(
+  panel.innerHTML.includes('showing ' + (beforeRemove - 1) + ' of ' + (beforeRemove - 1)),
+  'the board head count follows the removal'
+);
+
+// It must go through the host's remove helper when the app provides one, so the
+// beta board and the legacy board delete rows the same way.
+let delegated = 0;
+context.opsRemoveRow = (index) => { delegated += 1; rows.splice(index, 1); };
+const beforeDelegate = rows.length;
+listeners.click(event('row-remove', { dataset: { obAction: 'row-remove', obIndex: '2' } }));
+assert.strictEqual(delegated, 1, 'removal defers to the host opsRemoveRow when it exists');
+assert.strictEqual(rows.length, beforeDelegate - 1, 'the delegated removal took the row out');
+
+// A host helper that declines (user cancelled) must not repaint a phantom.
+const beforeDecline = rows.length;
+const paintedBefore = panel.innerHTML;
+context.opsRemoveRow = () => {};
+listeners.click(event('row-remove', { dataset: { obAction: 'row-remove', obIndex: '2' } }));
+assert.strictEqual(rows.length, beforeDecline, 'a declined host removal changes nothing');
+assert.strictEqual(panel.innerHTML, paintedBefore, 'a declined host removal does not repaint');
+delete context.opsRemoveRow;
+
+console.log('daily-ops-beta-scale: ok (dispatch console + no-tooltip controls, aligned menus, phone rail, row removal)');
