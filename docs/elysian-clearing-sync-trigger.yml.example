@@ -1,0 +1,26 @@
+# Optional: copy to elysian-clearing as
+#   .github/workflows/notify-heatmap-mirror.yml
+#
+# Triggers an immediate sync on utilization-heatmap whenever elysian-clearing
+# main is updated (instead of waiting for the 10-minute poll).
+#
+# Setup (one-time, on elysian-clearing):
+# 1. Create a fine-grained PAT with Contents: Read on elysian-clearing and
+#    Contents: Read + Actions: Write on utilization-heatmap.
+# 2. Add it as repo secret HEATMAP_SYNC_TOKEN on elysian-clearing.
+
+name: Notify heatmap mirror
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.HEATMAP_SYNC_TOKEN }}
+          repository: lete13/utilization-heatmap
+          event-type: elysian-clearing-updated

@@ -1,0 +1,76 @@
+name: Sync from elysian-clearing
+
+on:
+  # Poll upstream every 10 minutes (near-real-time without touching elysian-clearing).
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+  repository_dispatch:
+    types: [elysian-clearing-updated]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-from-elysian-clearing
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout utilization-heatmap
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mirror elysian-clearing main
+        run: |
+          set -euo pipefail
+
+          git config user.name "heatmap-sync[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream https://github.com/lete13/elysian-clearing.git 2>/dev/null || true
+          git fetch upstream main
+
+          UPSTREAM_SHA="$(git rev-parse upstream/main)"
+          TRACKED_SHA="$(tr -d '[:space:]' < .sandbox-upstream-sha 2>/dev/null || true)"
+
+          if [ "$UPSTREAM_SHA" = "$TRACKED_SHA" ]; then
+            echo "Already synced to elysian-clearing@${UPSTREAM_SHA:0:7} — nothing to do."
+            exit 0
+          fi
+
+          echo "Syncing ${TRACKED_SHA:-<none>} -> ${UPSTREAM_SHA}"
+
+          mkdir -p /tmp/heatmap-overlay
+          test -f AGENTS.md && cp AGENTS.md /tmp/heatmap-overlay/AGENTS.md
+          test -f .github/workflows/sync-from-elysian-clearing.yml && \
+            mkdir -p /tmp/heatmap-overlay/.github/workflows && \
+            cp .github/workflows/sync-from-elysian-clearing.yml /tmp/heatmap-overlay/.github/workflows/
+          test -f docs/elysian-clearing-sync-trigger.yml.example && \
+            mkdir -p /tmp/heatmap-overlay/docs && \
+            cp docs/elysian-clearing-sync-trigger.yml.example /tmp/heatmap-overlay/docs/
+
+          git checkout main
+          git reset --hard "$UPSTREAM_SHA"
+
+          if [ -f /tmp/heatmap-overlay/AGENTS.md ]; then
+            cp /tmp/heatmap-overlay/AGENTS.md AGENTS.md
+          fi
+          if [ -f /tmp/heatmap-overlay/.github/workflows/sync-from-elysian-clearing.yml ]; then
+            mkdir -p .github/workflows
+            cp /tmp/heatmap-overlay/.github/workflows/sync-from-elysian-clearing.yml .github/workflows/
+          fi
+          if [ -f /tmp/heatmap-overlay/docs/elysian-clearing-sync-trigger.yml.example ]; then
+            mkdir -p docs
+            cp /tmp/heatmap-overlay/docs/elysian-clearing-sync-trigger.yml.example docs/
+          fi
+          echo "$UPSTREAM_SHA" > .sandbox-upstream-sha
+
+          git add -A AGENTS.md .sandbox-upstream-sha .github/workflows/sync-from-elysian-clearing.yml docs/elysian-clearing-sync-trigger.yml.example
+          git commit -m "sync: mirror elysian-clearing@${UPSTREAM_SHA:0:7}"
+
+      - name: Push to utilization-heatmap main
+        run: git push --force-with-lease origin main
