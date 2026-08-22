@@ -47,9 +47,9 @@ jobs:
           UPSTREAM_SHA="$(git rev-parse upstream/main)"
           SHORT="${UPSTREAM_SHA:0:7}"
 
-          # Already merged (or main is a descendant) means there is nothing to bring over.
+          # Already contained in main means there is nothing to bring over.
           if git merge-base --is-ancestor "$UPSTREAM_SHA" origin/main; then
-            echo "Upstream $SHORT is already contained in main — nothing to do."
+            echo "Upstream $SHORT is already contained in main - nothing to do."
             exit 0
           fi
 
@@ -57,18 +57,21 @@ jobs:
           git push --force origin "$UPSTREAM_SHA:refs/heads/$BRANCH"
           echo "Pushed $BRANCH at $SHORT"
 
-          EXISTING="$(gh pr list --base main --head "$BRANCH" --state open \
-            --json number --jq '.[0].number // empty')"
+          EXISTING="$(gh pr list --base main --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
 
           if [ -n "$EXISTING" ]; then
             echo "PR #$EXISTING is already open; its branch now points at $SHORT."
             exit 0
           fi
 
+          {
+            echo "Brings [lete13/elysian-clearing](https://github.com/lete13/elysian-clearing) \`main\` (\`$SHORT\`) into this sandbox."
+            echo
+            echo "Opened automatically so upstream changes never overwrite sandbox-only work on \`main\`."
+            echo
+            echo "Merge when you want the upstream changes. If a file was changed both upstream and here (for example \`fe/daily-ops-beta.js\`), GitHub reports a conflict to resolve rather than discarding either side."
+          } > /tmp/sync-pr-body.md
+
           gh pr create --base main --head "$BRANCH" \
             --title "Sync from elysian-clearing ($SHORT)" \
-            --body "Brings [lete13/elysian-clearing](https://github.com/lete13/elysian-clearing) \`main\` (\`$SHORT\`) into this sandbox.
-
-Opened automatically so upstream changes never overwrite sandbox-only work on \`main\`.
-
-Merge when you want the upstream changes. If a file was changed both upstream and here (for example \`fe/daily-ops-beta.js\`), GitHub will report a conflict to resolve rather than discarding either side."
+            --body-file /tmp/sync-pr-body.md
