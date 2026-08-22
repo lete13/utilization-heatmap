@@ -7054,13 +7054,6 @@ function opsNavDate(n) {
   renderOps();
 }
 
-function opsTestButton() {
-  _opsEnsure();
-  const rowCount = Array.isArray(_opsRows) ? _opsRows.length : 0;
-  const taskCount = Array.isArray(S.daily?.tasks) ? S.daily.tasks.length : 0;
-  toast('Test button works — ' + _opsFmtDate(_opsDate) + ', ' + rowCount + ' row(s), ' + taskCount + ' task(s)', 'ok');
-}
-
 function opsSaveSnapshot() {
   _opsEnsure();
   // Collect current values from DOM inputs
@@ -7591,7 +7584,6 @@ function renderOps() {
         <div style="display:flex;gap:8px;align-items:center">
           ${snapLabel ? `<span style="font-size:11px;color:var(--tx3)">💾 ${snapLabel}</span>` : ''}
           <button class="btn sm" onclick="opsSaveSnapshot()" style="border-color:#1a7a4a;color:#1a7a4a;padding:5px 12px">💾 Snapshot</button>
-          <button class="btn sm" onclick="opsTestButton()" style="border-color:#2563EB;color:#2563EB;padding:5px 12px" title="Verify Daily Ops UI is wired up">🧪 Test</button>
           <button class="btn sm" onclick="opsCopyImage()" style="border-color:#7C3AED;color:#7C3AED;padding:5px 12px">📋 Copy Image</button>
           <button class="btn sm" onclick="document.getElementById('ops-sched-file').click()" style="border-color:#C9A84C;color:#C9A84C;padding:5px 12px" title="Upload a photo of the cleaning schedule — AI checks that every checkout is on it">📸 Check schedule</button>
           <input type="file" id="ops-sched-file" accept="image/*" style="display:none" onchange="opsScheduleCheck(this.files[0]);this.value=''">
