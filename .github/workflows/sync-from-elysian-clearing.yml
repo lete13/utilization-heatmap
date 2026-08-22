@@ -1,7 +1,14 @@
 name: Sync from elysian-clearing
 
+# Brings elysian-clearing main into this sandbox as a REVIEWABLE PULL REQUEST.
+#
+# This job never writes to main. Sandbox-only work committed here (for example
+# the Daily Ops redesign and prototype) is therefore never overwritten. Upstream
+# changes arrive on the sync/elysian-clearing branch and land only when the PR is
+# merged, so any file touched on both sides surfaces as a normal merge conflict
+# instead of being silently discarded.
+
 on:
-  # Poll upstream every 10 minutes (near-real-time without touching elysian-clearing).
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch:
@@ -10,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: sync-from-elysian-clearing
@@ -24,53 +32,43 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Mirror elysian-clearing main
+      - name: Open or update the upstream sync pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
-          git config user.name "heatmap-sync[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          BRANCH="sync/elysian-clearing"
 
           git remote add upstream https://github.com/lete13/elysian-clearing.git 2>/dev/null || true
-          git fetch upstream main
+          git fetch --quiet upstream main
+          git fetch --quiet origin main
 
           UPSTREAM_SHA="$(git rev-parse upstream/main)"
-          TRACKED_SHA="$(tr -d '[:space:]' < .sandbox-upstream-sha 2>/dev/null || true)"
+          SHORT="${UPSTREAM_SHA:0:7}"
 
-          if [ "$UPSTREAM_SHA" = "$TRACKED_SHA" ]; then
-            echo "Already synced to elysian-clearing@${UPSTREAM_SHA:0:7} — nothing to do."
+          # Already merged (or main is a descendant) means there is nothing to bring over.
+          if git merge-base --is-ancestor "$UPSTREAM_SHA" origin/main; then
+            echo "Upstream $SHORT is already contained in main — nothing to do."
             exit 0
           fi
 
-          echo "Syncing ${TRACKED_SHA:-<none>} -> ${UPSTREAM_SHA}"
+          # The branch only ever tracks upstream/main, so force-updating it is safe.
+          git push --force origin "$UPSTREAM_SHA:refs/heads/$BRANCH"
+          echo "Pushed $BRANCH at $SHORT"
 
-          mkdir -p /tmp/heatmap-overlay
-          test -f AGENTS.md && cp AGENTS.md /tmp/heatmap-overlay/AGENTS.md
-          test -f .github/workflows/sync-from-elysian-clearing.yml && \
-            mkdir -p /tmp/heatmap-overlay/.github/workflows && \
-            cp .github/workflows/sync-from-elysian-clearing.yml /tmp/heatmap-overlay/.github/workflows/
-          test -f docs/elysian-clearing-sync-trigger.yml.example && \
-            mkdir -p /tmp/heatmap-overlay/docs && \
-            cp docs/elysian-clearing-sync-trigger.yml.example /tmp/heatmap-overlay/docs/
+          EXISTING="$(gh pr list --base main --head "$BRANCH" --state open \
+            --json number --jq '.[0].number // empty')"
 
-          git checkout main
-          git reset --hard "$UPSTREAM_SHA"
-
-          if [ -f /tmp/heatmap-overlay/AGENTS.md ]; then
-            cp /tmp/heatmap-overlay/AGENTS.md AGENTS.md
+          if [ -n "$EXISTING" ]; then
+            echo "PR #$EXISTING is already open; its branch now points at $SHORT."
+            exit 0
           fi
-          if [ -f /tmp/heatmap-overlay/.github/workflows/sync-from-elysian-clearing.yml ]; then
-            mkdir -p .github/workflows
-            cp /tmp/heatmap-overlay/.github/workflows/sync-from-elysian-clearing.yml .github/workflows/
-          fi
-          if [ -f /tmp/heatmap-overlay/docs/elysian-clearing-sync-trigger.yml.example ]; then
-            mkdir -p docs
-            cp /tmp/heatmap-overlay/docs/elysian-clearing-sync-trigger.yml.example docs/
-          fi
-          echo "$UPSTREAM_SHA" > .sandbox-upstream-sha
 
-          git add -A AGENTS.md .sandbox-upstream-sha .github/workflows/sync-from-elysian-clearing.yml docs/elysian-clearing-sync-trigger.yml.example
-          git commit -m "sync: mirror elysian-clearing@${UPSTREAM_SHA:0:7}"
+          gh pr create --base main --head "$BRANCH" \
+            --title "Sync from elysian-clearing ($SHORT)" \
+            --body "Brings [lete13/elysian-clearing](https://github.com/lete13/elysian-clearing) \`main\` (\`$SHORT\`) into this sandbox.
 
-      - name: Push to utilization-heatmap main
-        run: git push --force-with-lease origin main
+Opened automatically so upstream changes never overwrite sandbox-only work on \`main\`.
+
+Merge when you want the upstream changes. If a file was changed both upstream and here (for example \`fe/daily-ops-beta.js\`), GitHub will report a conflict to resolve rather than discarding either side."
