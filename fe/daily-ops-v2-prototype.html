@@ -61,6 +61,80 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 ::placeholder{color:#A6ACB3}
 .noteinput::placeholder,.inline::placeholder{color:#C3C7CC}
 
+/* ═══════════════════════════════════════════════════════════════
+   COLOUR + CLARITY LAYER (novice-friendly)
+   Same structure — richer colour cues so an untrained user can
+   scan the board and instantly see what needs doing.
+   ═══════════════════════════════════════════════════════════════ */
+/* status shown as a bold, filled, labelled pill with an icon */
+.c-status .status{
+  padding:3px 10px 3px 8px;border-radius:999px;font-weight:600;font-size:11px;
+  line-height:1;white-space:nowrap;
+}
+.c-status .status .d{display:none}          /* replace tiny dot with an icon */
+.c-status .status::before{font-size:11px;margin-right:1px}
+.status.s-unassigned{background:#FBEFD8;color:#8A5B12}
+.status.s-unassigned::before{content:"⚠"}
+.status.s-block{background:#FBE3E0;color:#9C362D}
+.status.s-block::before{content:"⛔"}
+.status.s-work{background:#E3EDF8;color:#2F5C8C}
+.status.s-work::before{content:"🧹"}
+.status.s-ready{background:#E7EEEC;color:#2C4A3E}
+.status.s-ready::before{content:"⏳"}
+.status.s-done{background:#DFF1E7;color:#1F6B4A}
+.status.s-done::before{content:"✓"}
+.status.s-open{background:#EFF0F2;color:#6B727B}
+.status.s-open::before{content:"○"}
+/* coloured left accent per row status — lets the eye scan the list */
+.row::before{content:"";position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:0 3px 3px 0;background:transparent}
+.row.st-unassigned::before{background:#E7A733}
+.row.st-block::before{background:#C0483E}
+.row.st-work::before{background:#3B6EA5}
+.row.st-ready::before{background:#7FA394}
+.row.st-done::before{background:#4E9E76}
+.row.st-unassigned{background:#FEFBF4}
+.row.st-block{background:#FEF6F5}
+.row.st-work{background:#F6FAFE}
+.row.st-done{background:#F5FBF7}
+/* the primary action for a novice: "Assign". Make it clearly tappable (amber). */
+.assign{
+  background:#F6E4BE;box-shadow:inset 0 0 0 1px #E3C889;color:#7A531A;font-weight:600;
+}
+.assign:hover{background:#F0D69E;box-shadow:inset 0 0 0 1px #D8B871}
+.assign:active{background:#EACB8A}
+.assign.plus{background:rgba(22,40,58,.06);box-shadow:inset 0 0 0 1px rgba(22,40,58,.16);color:var(--navy-2)}
+/* check-in state as a clear coloured pill */
+.ci.yes{background:#DFF1E7;color:#1F6B4A;font-weight:600}
+.ci.unknown{background:#FBEFD8;color:#8A5B12;font-weight:600}
+/* kind & owner badges a touch more saturated so they register */
+.badge{background:#EBEEF1;color:#5C6672}
+.badge.k-maintenance{background:#EFE2F5;color:#6B4A85}
+.badge.k-preparation{background:#E3ECF7;color:#3C6091}
+.badge.k-extended{background:#E6F0E1;color:#4A6B3F}
+/* the "done" tick reads greener */
+.tick.on{background:#3E9E72;border-color:#3E9E72}
+/* stat cards: coloured top accent so each KPI has an identity */
+.cards .card{position:relative;overflow:hidden}
+.cards .card::before{content:"";position:absolute;left:0;right:0;top:0;height:3px}
+.cards .card.tasks::before{background:#C9A84C}
+.cards .card.compactprog::before{background:#3E9E72}
+.cards .card:nth-child(3)::before{background:#E7A733}
+.cards .card:nth-child(4)::before{background:#3B6EA5}
+/* ── colour legend (fixed, always visible for new users) ───────── */
+#ck-legend{
+  position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:60;
+  display:flex;gap:14px;align-items:center;flex-wrap:wrap;justify-content:center;
+  background:rgba(255,255,255,.94);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  border:1px solid #E8E3DA;border-radius:999px;box-shadow:0 6px 22px rgba(22,40,58,.12);
+  padding:8px 16px;font-size:11px;color:#5A6675;max-width:calc(100vw - 32px);
+}
+#ck-legend b{font-weight:600;color:#16283A;margin-right:2px}
+#ck-legend .lg{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+#ck-legend .sw{width:11px;height:11px;border-radius:50%;flex:none}
+#ck-legend .close{margin-left:4px;color:#AEB5BD;font-size:14px;cursor:pointer;background:none;border:0}
+#ck-legend .close:hover{color:#B4453C}
+#ck-legend.hide{display:none}
+
 /* ── shell ─────────────────────────────────────────────────── */
 .wrap{max-width:1680px;margin:0 auto;padding:0 28px 60px}
 .shell{display:grid;grid-template-columns:minmax(0,1fr) 312px;gap:30px;align-items:start}
@@ -602,6 +676,15 @@ input[type=checkbox].box:checked::after{
 </head>
 <body>
 <div id="app"></div>
+<div id="ck-legend">
+  <b>What the colours mean:</b>
+  <span class="lg"><span class="sw" style="background:#E7A733"></span>⚠ Unassigned — needs a cleaner</span>
+  <span class="lg"><span class="sw" style="background:#C0483E"></span>⛔ Blocking — can't proceed</span>
+  <span class="lg"><span class="sw" style="background:#3B6EA5"></span>🧹 Cleaning — in progress</span>
+  <span class="lg"><span class="sw" style="background:#7FA394"></span>⏳ Ready — set to go</span>
+  <span class="lg"><span class="sw" style="background:#4E9E76"></span>✓ Done — cleaned</span>
+  <button class="close" onclick="document.getElementById('ck-legend').classList.add('hide')" title="Hide legend" aria-label="Hide legend">×</button>
+</div>
 <div id="toast" role="status"></div>
 
 <script>
