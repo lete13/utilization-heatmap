@@ -486,10 +486,13 @@
     });
     var chips = ordered.map(function (part) {
       var flag = extra ? '' : flagForPart(part);
+      // a stable per-flag class so each tag can carry its own colour
+      var kind = flagForPart(part) || (/sofa bed/i.test(part) ? 'sofa' : (/^Long stay/i.test(part) ? 'longstay' : ''));
+      var kindCls = kind ? ' ob-t-' + kind : '';
       var remove = flag
         ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Remove ' + esc(part) + '">×</button>'
         : '';
-      return '<span class="ob-nchip' + partTone(part) + '"><span>' + esc(chipLabel(part)) + '</span>' + remove + '</span>';
+      return '<span class="ob-nchip' + partTone(part) + kindCls + '"><span>' + esc(chipLabel(part)) + '</span>' + remove + '</span>';
     }).join('');
     return '<div class="ob-nchips ob-nchips-all">' + chips + '</div>';
   }

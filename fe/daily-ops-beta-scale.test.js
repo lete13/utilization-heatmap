@@ -193,13 +193,18 @@ assert(panel.innerHTML.includes('ob-nchip cool'), 'sofa / Early notes render as 
 // in sentence case while the underlying comment string is left alone. The notes
 // column is ~138px wide and also holds the free-text field, so only the leading
 // tag is drawn and the remainder becomes a hover-titled count.
-assert(/ob-nchip hot"><span>Priority</.test(panel.innerHTML), 'the actionable flag leads and is hot/red');
+// Every flag carries its own colour class (park = blue, priority = red,
+// late = orange, early = yellow) so the notes column is readable at a glance.
+assert(/ob-nchip hot ob-t-priority"><span>Priority</.test(panel.innerHTML), 'the actionable flag leads and is hot/red');
 assert(!/>PRIORITY</.test(panel.innerHTML), 'no chip shouts the raw stored token');
 assert(rows[0].comments.includes('PRIORITY'), 'the stored comment token itself is untouched');
 assert(
-  /ob-nchip hot"><span>Priority<\/span><button[^>]*data-ob-flag="priority"/.test(panel.innerHTML),
+  /ob-t-priority"><span>Priority<\/span><button[^>]*data-ob-flag="priority"/.test(panel.innerHTML),
   'a flag-backed tag stays removable straight from its chip'
 );
+['ob-t-priority', 'ob-t-late', 'ob-t-early'].forEach((cls) => {
+  assert(panel.innerHTML.includes(cls), 'per-tag colour class present: ' + cls);
+});
 // Every active tag is now rendered as its own chip — no "+N" collapsing —
 // so an operator sees the full flag set for a row without hovering.
 assert(!/ob-nmore/.test(panel.innerHTML), 'tags no longer collapse into a count');

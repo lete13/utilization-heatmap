@@ -1911,10 +1911,12 @@
 #tab-ops .ob-dispatch-table:has(tbody tr:nth-child(17)) tbody td {
   padding-top: 3px;
   padding-bottom: 3px;
+  height: 30px;
 }
 #tab-ops .ob-dispatch-table:has(tbody tr:nth-child(27)) tbody td {
   padding-top: 2px;
   padding-bottom: 2px;
+  height: 27px;
 }
 #tab-ops .ob-dispatch-table:has(tbody tr:nth-child(27)) .ob-det-line {
   font-size: 10px;
@@ -1922,6 +1924,7 @@
 #tab-ops .ob-dispatch-table:has(tbody tr:nth-child(41)) tbody td {
   padding-top: 1px;
   padding-bottom: 1px;
+  height: 24px;
 }
 #tab-ops .ob-dispatch-table:has(tbody tr:nth-child(41)) .ob-det-line {
   display: none;
@@ -1935,20 +1938,52 @@
 }
 
 /* ── All active note flags visible on every row ────────────────────────────
-   The notes cell used to show one chip plus a "+N" counter. Operators asked
-   to see the whole flag set per row, so chips are allowed to wrap onto a
-   second line instead of being clipped. */
+   Every flag gets its own chip, but the row height must NOT change: a board
+   whose rows grow when a property picks up a third tag is impossible to scan.
+   So the chips stay on a single line and the cell scrolls horizontally when
+   they overrun, instead of wrapping onto a second line. */
 #tab-ops .ob-note-cell {
-  flex-wrap: wrap;
-  overflow: visible;
-  row-gap: 3px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;              /* Firefox: hide the bar, keep the scroll */
 }
+#tab-ops .ob-note-cell::-webkit-scrollbar { height: 0; width: 0; }
 #tab-ops .ob-nchips.ob-nchips-all {
-  flex-wrap: wrap;
-  row-gap: 3px;
+  flex-wrap: nowrap;
+  flex: none;
 }
-/* chips no longer compete for one line, so let each show its full label */
-#tab-ops .ob-nchips-all .ob-nchip { flex: none; max-width: 100%; }
+/* chips keep their full label and never shrink into illegibility */
+#tab-ops .ob-nchips-all .ob-nchip { flex: none; max-width: none; }
+#tab-ops .ob-nchips-all .ob-nchip > span { overflow: visible; text-overflow: clip; }
+
+/* Row height is pinned so tags never push the row taller */
+#tab-ops .ob-dispatch-row > td { height: 34px; }
+#tab-ops .ob-dispatch-row > td.ob-c-note { max-width: 0; }
+
+/* ── Per-tag colours ───────────────────────────────────────────────────────
+   One colour per meaning, so a glance at the notes column is enough:
+   park bed = light blue · priority = red · late checkout = orange ·
+   early check-in = yellow.                                                  */
+#tab-ops .ob-nchip.ob-t-park {
+  background: #e3f0fb; color: #23628f;
+}
+#tab-ops .ob-nchip.ob-t-park button { color: #8fb6d2; }
+
+#tab-ops .ob-nchip.ob-t-priority {
+  background: #fbe3e0; color: #a5342a; font-weight: 600;
+}
+#tab-ops .ob-nchip.ob-t-priority button { color: #c99b95; }
+
+#tab-ops .ob-nchip.ob-t-late {
+  background: #fdeada; color: #a35b12;
+}
+#tab-ops .ob-nchip.ob-t-late button { color: #d3a978; }
+
+#tab-ops .ob-nchip.ob-t-early {
+  background: #fbf3cd; color: #8a6d0c;
+}
+#tab-ops .ob-nchip.ob-t-early button { color: #cbb96e; }
 
 /* ── Accent: dark navy to match the sidebar ────────────────────────────────
    The board's accent was a muted green (#315f53), which read as a third
