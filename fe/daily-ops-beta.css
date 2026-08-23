@@ -1340,6 +1340,22 @@
   #tab-ops .ob-datebar,
   #tab-ops .ob-savestate { flex: 0 0 auto; }
   #tab-ops .ob-dispatch-row td { height: auto; }
+  /* The app shell keeps its ~216px nav all the way down, so the tab is roughly
+     300px narrower than the viewport. Long before the 760px tier the search and
+     the two selects stop leaving a usable scroll window for the chips — at 768
+     they squeezed the strip down to 8px, which reads as "the filters are gone".
+     Give the tools their own line here and re-point the two sticky offsets,
+     which are literal sums of the bar and the (now taller) rail. */
+  #tab-ops {
+    --ob-rail: 80px;
+    --ob-stick: 130px;
+  }
+  #tab-ops .ob-rail { flex-wrap: wrap; gap: 8px 10px; }
+  #tab-ops .ob-segs { flex: 1 1 100%; }
+  #tab-ops .ob-railtools { width: 100%; flex-wrap: wrap; gap: 6px; }
+  #tab-ops .ob-search { flex: 1 1 180px; width: auto; min-width: 0; }
+  #tab-ops .ob-field { flex: 1 1 auto; min-width: 0; }
+  #tab-ops .ob-railtools .ob-select { flex: 1 1 auto; width: auto; min-width: 0; }
 }
 
 /* ~500px of tab: the summary cards stack two-up, the rail wraps, and the top
