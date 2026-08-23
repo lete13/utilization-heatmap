@@ -495,12 +495,45 @@ assert(
   /\.ob-segs\s*\{[^}]*radial-gradient\(farthest-side at 100% 50%/.test(css),
   'chips carry a scroll-shadow affordance showing there is more to reach'
 );
-[760, 520].forEach((tier) => {
+[1100, 760, 520].forEach((tier) => {
   assert(
     !new RegExp('@media \\(max-width: ' + tier + 'px\\)[^@]*\\.ob-segs\\s*\\{[^}]*display:\\s*none').test(css),
     'the rail is never hidden at the ' + tier + 'px tier'
   );
 });
+
+// The app shell keeps a ~216px nav at every width, so the tab runs ~300px
+// narrower than the viewport. "Not display:none" was not enough on its own: at
+// 768 the non-shrinking tools cluster starved the chip strip down to 8px, which
+// reads exactly like the filters being gone. The tools must take their own line
+// from the card tier down, and the sticky offsets must follow the taller rail.
+const tabletRail = /@media \(max-width: 1100px\)[^@]*/.exec(css);
+assert(tabletRail, 'the card tier exists');
+assert(
+  /#tab-ops \.ob-rail\s*\{[^}]*flex-wrap:\s*wrap/.test(tabletRail[0]),
+  'the rail wraps at the card tier instead of crushing the chips'
+);
+assert(
+  /#tab-ops \.ob-segs\s*\{[^}]*flex:\s*1 1 100%/.test(tabletRail[0]),
+  'the chip strip claims a full line of the wrapped rail'
+);
+assert(
+  /#tab-ops \.ob-railtools\s*\{[^}]*width:\s*100%/.test(tabletRail[0]),
+  'search / group / sort drop to their own line rather than starving the chips'
+);
+assert(
+  /--ob-rail:\s*80px/.test(tabletRail[0]) && /--ob-stick:\s*130px/.test(tabletRail[0]),
+  'the sticky offsets are re-pointed to the taller wrapped rail'
+);
+// --ob-stick is documented as a literal sum of the bar and rail; keep it true so
+// the bulk bar and the pinned area headers cannot creep under the rail.
+const barPx = Number(/--ob-bar:\s*(\d+)px/.exec(css)[1]);
+const railPx = Number(/--ob-rail:\s*(\d+)px/.exec(tabletRail[0])[1]);
+const stickPx = Number(/--ob-stick:\s*(\d+)px/.exec(tabletRail[0])[1]);
+assert(
+  stickPx === barPx + railPx,
+  'the card-tier sticky offset stays the sum of the bar and the wrapped rail'
+);
 
 // 4. Mobile day bar and list header get room to breathe instead of clipping.
 assert(
