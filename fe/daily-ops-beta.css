@@ -1819,3 +1819,117 @@
   #tab-ops .ob-dispatch-row { background: var(--ob-surface); box-shadow: var(--ob-shadow); }
 }
 
+
+/* ── Colour & clarity layer ────────────────────────────────────────────────
+   Appended last so it wins over the "calm" layer above. Goal: someone who
+   has never used the board should see, at a glance, what still needs doing.
+   Colour is carried by the status pill and a thin rail on the row — the row
+   background stays almost white so a busy day never becomes a wall of colour. */
+
+/* Status reads as a filled, labelled pill with an icon instead of a grey dot */
+#tab-ops .ob-row-status {
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+#tab-ops .ob-row-status i { display: none; }
+#tab-ops .ob-row-status::before { font-size: 10.5px; margin-right: 2px; }
+
+#tab-ops .ob-row-status.unassigned,
+#tab-ops .ob-row-status.unassigned i { background: #fbefd8; color: #8a5b12; }
+#tab-ops .ob-row-status.unassigned::before { content: "\26A0"; }
+
+#tab-ops .ob-row-status.blocking { background: #fbe3e0; color: #9c362d; font-weight: 600; }
+#tab-ops .ob-row-status.blocking::before { content: "\26D4"; }
+
+#tab-ops .ob-row-status.ready { background: #e7eeec; color: #2c4a3e; }
+#tab-ops .ob-row-status.ready::before { content: "\23F3"; }
+
+#tab-ops .ob-row-status.done { background: #dff1e7; color: #1f6b4a; }
+#tab-ops .ob-row-status.done::before { content: "\2713"; }
+
+#tab-ops .ob-row-status.excluded { background: #eff0f2; color: #6b727b; }
+#tab-ops .ob-row-status.excluded::before { content: "\25CB"; }
+
+/* Thin coloured rail on each row so the eye can scan the list vertically */
+#tab-ops .ob-dispatch-row > td:first-child { position: relative; }
+#tab-ops .ob-dispatch-row > td:first-child::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 4px; bottom: 4px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: transparent;
+}
+#tab-ops .ob-dispatch-row.unassigned > td:first-child::before { background: #e7a733; }
+#tab-ops .ob-dispatch-row.blocking   > td:first-child::before { background: #c0483e; }
+#tab-ops .ob-dispatch-row.ready      > td:first-child::before { background: #7fa394; }
+#tab-ops .ob-dispatch-row.done       > td:first-child::before { background: #4e9e76; }
+
+/* Barely-there row tints: enough to group, never enough to shout */
+#tab-ops .ob-dispatch-row.unassigned { background: #fffdf8; }
+#tab-ops .ob-dispatch-row.blocking   { background: #fffaf9; }
+#tab-ops .ob-dispatch-row.done       { background: #f8fcfa; }
+
+/* "Assign" is the one action an unstaffed row needs — make it look tappable */
+#tab-ops .ob-dispatch-row.unassigned .ob-assign {
+  background: #f6e4be;
+  box-shadow: inset 0 0 0 1px #e3c889;
+  color: #7a531a;
+  font-weight: 600;
+}
+#tab-ops .ob-dispatch-row.unassigned .ob-assign:hover {
+  background: #f0d69e;
+  box-shadow: inset 0 0 0 1px #d8b871;
+}
+
+/* Check-in state as a clear pill (yes = settled, unknown = needs chasing) */
+#tab-ops .ob-ci.yes     { background: #dff1e7; color: #1f6b4a; font-weight: 600; }
+#tab-ops .ob-ci.unknown { background: #fbefd8; color: #8a5b12; font-weight: 600; }
+
+/* KPI cards get an identity stripe so each number is recognisable at a glance */
+#tab-ops .ob-card { position: relative; overflow: hidden; }
+#tab-ops .ob-card::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 3px;
+  background: #d8d3c8;
+}
+#tab-ops .ob-cards .ob-card:nth-child(1)::before { background: #c9a84c; }
+#tab-ops .ob-cards .ob-card:nth-child(2)::before { background: #3e9e72; }
+#tab-ops .ob-cards .ob-card:nth-child(3)::before { background: #e7a733; }
+#tab-ops .ob-cards .ob-card:nth-child(4)::before { background: #3b6ea5; }
+
+/* ── Adaptive density ──────────────────────────────────────────────────────
+   The busier the day, the tighter the rows pack, so a full day stays visible
+   without endless scrolling. Only vertical padding and the secondary detail
+   line compress — names, pills and controls stay legible and tappable. */
+#tab-ops .ob-dispatch-table:has(tbody tr:nth-child(17)) tbody td {
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+#tab-ops .ob-dispatch-table:has(tbody tr:nth-child(27)) tbody td {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+#tab-ops .ob-dispatch-table:has(tbody tr:nth-child(27)) .ob-det-line {
+  font-size: 10px;
+}
+#tab-ops .ob-dispatch-table:has(tbody tr:nth-child(41)) tbody td {
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+#tab-ops .ob-dispatch-table:has(tbody tr:nth-child(41)) .ob-det-line {
+  display: none;
+}
+
+/* Dark mode: keep the same meaning, adjust the surfaces so text stays readable */
+@media (prefers-color-scheme: dark) {
+  #tab-ops .ob-dispatch-row.unassigned,
+  #tab-ops .ob-dispatch-row.blocking,
+  #tab-ops .ob-dispatch-row.done { background: transparent; }
+}
