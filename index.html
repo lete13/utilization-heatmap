@@ -115,6 +115,45 @@
     .ss-opt.sel{font-weight:500;color:#0F1E2E}
     .ss-sep{padding:4px 12px;font-size:10px;font-weight:600;color:var(--tx3);text-transform:uppercase;letter-spacing:.05em;background:var(--bg3);border-top:.5px solid var(--bdr)}
     .ss-none{padding:10px 12px;font-size:12px;color:var(--tx3);font-style:italic}
+
+    /* ═══ Daily Ops — colour coding + adaptive density ═══════════════════
+       Real borders (not pseudo-elements) so the "Copy Image" export
+       renders them correctly too. Scoped to #tab-ops only.              */
+    #tab-ops .ops-table tbody tr td:first-child{
+      border-left:4px solid #D1D5DB !important;   /* default: neutral */
+    }
+    #tab-ops .ops-table tbody tr.op-arrival td:first-child{ border-left-color:#3B6EA5 !important; }
+    #tab-ops .ops-table tbody tr.op-unknown td:first-child{ border-left-color:#E7A733 !important; }
+    #tab-ops .ops-table tbody tr.op-yes     td:first-child{ border-left-color:#4E9E76 !important; }
+    #tab-ops .ops-table tbody tr.op-no      td:first-child{ border-left-color:#C0483E !important; }
+    /* late checkout: flag the row number cell so it reads at a glance */
+    #tab-ops .ops-table tbody tr.op-late td:first-child{
+      background:#FEF3C7; color:#92400E; font-weight:700;
+    }
+    /* already cleaned/requested: calm the row down so attention goes elsewhere */
+    #tab-ops .ops-table tbody tr.op-req td:nth-child(2){ color:#6B7280; }
+    #tab-ops .ops-table tbody tr:hover{ filter:brightness(.985); }
+
+    /* adaptive density — only vertical space and the least-critical text
+       compress; names, pills and controls stay legible and tappable      */
+    #tab-ops .ops-table.ops-snug   tbody td{ padding-top:2px !important; padding-bottom:2px !important; }
+    #tab-ops .ops-table.ops-tight  tbody td{ padding-top:1px !important; padding-bottom:1px !important; font-size:11.5px; }
+    #tab-ops .ops-table.ops-tight  tbody td input[type=text],
+    #tab-ops .ops-table.ops-tight  tbody td input[type=number]{ font-size:11.5px; }
+    #tab-ops .ops-table.ops-xtight tbody td{ padding-top:0 !important; padding-bottom:0 !important; font-size:11px; line-height:1.25; }
+    #tab-ops .ops-table.ops-xtight tbody td input[type=text],
+    #tab-ops .ops-table.ops-xtight tbody td input[type=number]{ font-size:11px; }
+    #tab-ops .ops-table.ops-xtight tbody td button{ font-size:9.5px !important; padding:2px 6px !important; }
+
+    /* colour legend — helps someone using the board for the first time */
+    .ops-legend{
+      display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+      background:var(--bg2);border:.5px solid var(--bdr2);border-radius:var(--r);
+      padding:7px 12px;margin-bottom:10px;font-size:11px;color:var(--tx2);
+    }
+    .ops-legend b{color:var(--tx);font-weight:700;margin-right:2px}
+    .ops-legend .lg{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+    .ops-legend .sw{width:11px;height:11px;border-radius:3px;flex:none}
   </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -6404,7 +6443,15 @@ function _opsBuildRow(row, i) {
   const lClr = row.lateCheckout ? '#92400E' : '#9CA3AF';
   const lBrd = row.lateCheckout ? '1.5px solid #F59E0B' : '1px solid #ddd';
   const lTxt = row.lateCheckout ? '\u26a0 LATE CO' : 'Late CO';
-  return `<tr style="background:${bg}">
+  // state class drives the colour-coding layer (see #tab-ops CSS)
+  let _st = 'op-no';
+  if (row.isCheckinOnly) _st = 'op-arrival';
+  else if (row.checkinSameDay === 'unknown') _st = 'op-unknown';
+  else if (row.checkinSameDay === 'yes') _st = 'op-yes';
+  const _cls = _st
+    + (row.lateCheckout ? ' op-late' : '')
+    + (row.checkoutRequested ? ' op-req' : '');
+  return `<tr class="${_cls}" style="background:${bg}">
     <td style="padding:4px 6px;border:1px solid #ddd;text-align:center;font-size:11px;color:#666">${i+1}</td>
     <td style="padding:4px 8px;border:1px solid #ddd;font-size:12px;font-weight:600;color:#1a1a2e">${row.aptName}</td>
     <td style="padding:4px 6px;border:1px solid #ddd;text-align:center">
@@ -6830,6 +6877,12 @@ function renderOps() {
   });
   const pendingTasks = tasks.filter(function(t){ return !t.completed; });
 
+  // adaptive density: the busier the day, the tighter the rows pack,
+  // so the whole day's list stays visible without endless scrolling
+  const _opsDens = _opsRows.length > 40 ? 'ops-xtight'
+                 : _opsRows.length > 26 ? 'ops-tight'
+                 : _opsRows.length > 16 ? 'ops-snug' : '';
+
   const rowsHtml = _opsRows.length
     ? _opsRows.map(function(r,i){ return _opsBuildRow(r,i); }).join('')
     : '<tr><td colspan="9" style="text-align:center;padding:20px;color:#9CA3AF;font-style:italic">Δεν υπάρχουν checkout για ' + _opsFmtDate(_opsDate) + '</td></tr>';
@@ -6890,12 +6943,22 @@ function renderOps() {
         </div>` : `<div id="ops-tasks" style="font-size:12px;color:var(--tx3)">No open tasks — great! Use "+ Add Task" to track anything that needs follow-up.</div>`}
       </div>
 
+      <!-- ── Colour legend ───────────────────────────────────────────────── -->
+      <div class="ops-legend">
+        <b>Colours:</b>
+        <span class="lg"><span class="sw" style="background:#4E9E76"></span>Check-in same day</span>
+        <span class="lg"><span class="sw" style="background:#E7A733"></span>Check-in unknown</span>
+        <span class="lg"><span class="sw" style="background:#3B6EA5"></span>Arrival only (no checkout)</span>
+        <span class="lg"><span class="sw" style="background:#C0483E"></span>No check-in today</span>
+        <span class="lg"><span class="sw" style="background:#FEF3C7;border:1px solid #F59E0B"></span>Late checkout</span>
+      </div>
+
       <!-- ── Printable table ─────────────────────────────────────────────── -->
       <div id="ops-printable" style="background:#fff;border-radius:8px;border:1px solid #E5E7EB;padding:12px">
         <div style="text-align:center;font-weight:700;font-size:13px;color:#1a1a2e;margin-bottom:10px;letter-spacing:.04em">
           ELYSIAN — DAILY OPERATIONS — ${_opsFmtDate(_opsDate)}
         </div>
-        <table style="border-collapse:collapse;width:100%;font-size:12px">
+        <table class="ops-table ${_opsDens}" style="border-collapse:collapse;width:100%;font-size:12px">
           <thead>
             <tr style="background:#1a1a2e;color:#fff">
               <th style="padding:7px 6px;border:1px solid #374151;width:24px;text-align:center">#</th>
