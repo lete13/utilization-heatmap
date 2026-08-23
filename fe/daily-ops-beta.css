@@ -1933,3 +1933,19 @@
   #tab-ops .ob-dispatch-row.blocking,
   #tab-ops .ob-dispatch-row.done { background: transparent; }
 }
+
+/* ── All active note flags visible on every row ────────────────────────────
+   The notes cell used to show one chip plus a "+N" counter. Operators asked
+   to see the whole flag set per row, so chips are allowed to wrap onto a
+   second line instead of being clipped. */
+#tab-ops .ob-note-cell {
+  flex-wrap: wrap;
+  overflow: visible;
+  row-gap: 3px;
+}
+#tab-ops .ob-nchips.ob-nchips-all {
+  flex-wrap: wrap;
+  row-gap: 3px;
+}
+/* chips no longer compete for one line, so let each show its full label */
+#tab-ops .ob-nchips-all .ob-nchip { flex: none; max-width: 100%; }

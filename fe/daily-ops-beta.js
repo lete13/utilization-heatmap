@@ -478,27 +478,20 @@
   function noteChipsHtml(note, index, extra) {
     var parts = managedParts(note);
     if (!parts.length) return '';
-    // Most actionable first: a flag the operator can clear outranks a fact the
-    // app derived, and only the leading chip has room to stay legible.
+    // Show EVERY active flag: an operator scanning the board should see the
+    // whole picture for a row without hovering or opening the ⋯ menu.
+    // Most actionable first, so the flags they can clear lead the line.
     var ordered = parts.slice().sort(function (a, b) {
       return (partTone(b) === ' hot' ? 1 : 0) - (partTone(a) === ' hot' ? 1 : 0);
     });
-    var head = ordered[0];
-    var rest = ordered.slice(1);
-    var flag = extra ? '' : flagForPart(head);
-    var remove = flag
-      ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Remove ' + esc(head) + '">×</button>'
-      : '';
-    // The remainder is named for assistive tech in text rather than a title=,
-    // because Chrome paints that as a black popup that reads like a debug toast.
-    var more = rest.length
-      ? '<span class="ob-nchip ob-nmore"><span aria-hidden="true">+' + rest.length + '</span>' +
-        '<span class="ob-sr">' + esc(rest.map(chipLabel).join(' · ')) + '</span></span>'
-      : '';
-    return '<div class="ob-nchips">' +
-      '<span class="ob-nchip' + partTone(head) + '"><span>' + esc(chipLabel(head)) + '</span>' + remove + '</span>' +
-      more +
-      '</div>';
+    var chips = ordered.map(function (part) {
+      var flag = extra ? '' : flagForPart(part);
+      var remove = flag
+        ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Remove ' + esc(part) + '">×</button>'
+        : '';
+      return '<span class="ob-nchip' + partTone(part) + '"><span>' + esc(chipLabel(part)) + '</span>' + remove + '</span>';
+    }).join('');
+    return '<div class="ob-nchips ob-nchips-all">' + chips + '</div>';
   }
 
   // ── row pieces ───────────────────────────────────────────────────────────
@@ -617,7 +610,6 @@
     // its own rail segment; reserve the blocking word for the other causes so
     // the status column keeps discriminating. The Blocking filter is unchanged.
     if (target && !cleaners(target).length) return { cls: 'unassigned', word: 'Unassigned' };
-    if (itemBlocking(item)) return { cls: 'blocking', word: 'Blocking' };
     return { cls: 'ready', word: 'Ready' };
   }
 
@@ -840,7 +832,6 @@
   // flag vocabulary the ⋯ menu writes into the notes column.
   function legendHtml() {
     return '<div class="ob-tone-legend" aria-label="Board colour key">' +
-      '<span class="ob-tone-lg"><i class="tone-hot"></i>Blocking</span>' +
       '<span class="ob-tone-lg"><i class="tone-warn"></i>Unassigned / check-in unknown</span>' +
       '<span class="ob-tone-lg"><i class="tone-done"></i>Done</span>' +
       '<span class="ob-tone-lg"><i class="tone-open"></i>Neutral — nothing to flag</span>' +
@@ -1193,7 +1184,6 @@
   function railHtml(allItems, summary, cleanDay) {
     var segs = [
       ['all', 'All', allItems.length, ''],
-      ['attention', 'Blocking', summary.decisions, 'ob-d-hot'],
       ['unknown', 'Unknown check-in', summary.unknown, 'ob-d-warn'],
       ['open', 'Open', summary.open, 'ob-d-cool'],
       ['unassigned', 'Unassigned', summary.unassigned, 'ob-d-warn'],
