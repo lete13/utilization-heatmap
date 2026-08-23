@@ -374,7 +374,7 @@
 /* phone-only progress strip that replaces the ring card */
 #tab-ops .ob-progstrip { display: none; }
 #tab-ops .ob-striptrack { flex: 1 1 auto; min-width: 60px; height: 4px; overflow: hidden; border-radius: 999px; background: #efece6; }
-#tab-ops .ob-striptrack i { display: block; height: 100%; border-radius: 999px; background: var(--ob-navy); }
+#tab-ops .ob-striptrack i { display: block; height: 100%; border-radius: 999px; background: var(--ob-gold); }
 
 /* ── D. sticky filter rail ───────────────────────────────────────────────── */
 #tab-ops .ob-rail {
@@ -450,7 +450,14 @@
 }
 #tab-ops .ob-filter.on em { color: #9a8231; }
 
-#tab-ops .ob-railtools { display: flex; align-items: center; gap: 8px; flex: none; }
+#tab-ops .ob-rail .ob-input,
+#tab-ops .ob-rail .ob-select {
+  background: rgba(246, 241, 232, .08);
+  border-color: rgba(201, 168, 76, .28);
+  color: var(--ob-cream);
+  box-shadow: none;
+}
+#tab-ops .ob-rail .ob-input::placeholder { color: rgba(232, 224, 208, .4); }
 #tab-ops .ob-search { width: 200px; height: 28px; min-height: 28px; border-radius: 999px; padding: 0 12px; }
 #tab-ops .ob-field { display: inline-flex; align-items: center; gap: 6px; }
 #tab-ops .ob-field label { color: var(--ob-muted); font-size: 11px; }
@@ -505,9 +512,10 @@
 #tab-ops .ob-list-head h2 {
   margin: 0;
   color: var(--ob-navy);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -.005em;
+  font-family: var(--ob-serif);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: .01em;
 }
 #tab-ops .ob-list-head small { color: var(--ob-muted); font-size: 11px; }
 #tab-ops .ob-list-head .ob-clean-count { color: var(--ob-ink-2); font-size: 11.5px; font-variant-numeric: tabular-nums; font-weight: 600; }
@@ -516,7 +524,8 @@
    "select every matching row" affordance. */
 #tab-ops .ob-selectall { min-height: 22px; padding: 0 8px; font-size: 11.5px; font-weight: 500; }
 #tab-ops .ob-progress { width: 116px; height: 4px; overflow: hidden; border-radius: 999px; background: #efece6; }
-#tab-ops .ob-progress span { display: block; height: 100%; border-radius: inherit; background: var(--ob-navy); }
+#tab-ops .ob-progress span { display: block; height: 100%; border-radius: inherit; background: var(--ob-gold); }
+#tab-ops .ob-striptrack i { display: block; height: 100%; border-radius: 999px; background: var(--ob-gold); }
 
 /* Both axes visible: any other value makes this a scroll container and the
    sticky <th> below resolves `top` against it instead of the viewport. */
@@ -588,7 +597,7 @@
   background: var(--ob-surface);
 }
 #tab-ops .ob-grp-line { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-#tab-ops .ob-grp-line b { color: var(--ob-navy); font-size: 11.5px; font-weight: 600; letter-spacing: .005em; }
+#tab-ops .ob-grp-line b { color: var(--ob-navy); font-family: var(--ob-serif); font-size: 13px; font-weight: 500; letter-spacing: .02em; }
 #tab-ops .ob-grp-line em { color: #aeb3b9; font-size: 10.5px; font-style: normal; }
 #tab-ops .ob-gclean {
   margin-left: auto;
@@ -1106,20 +1115,22 @@
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: var(--ob-navy-2);
+  color: var(--ob-gold);
   cursor: pointer;
   font-family: inherit;
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
 }
-#tab-ops .ob-addlink:hover { background: rgba(22, 40, 58, .075); color: var(--ob-navy); }
+#tab-ops .ob-addlink:hover { background: rgba(201, 168, 76, .12); color: #d4b45c; }
 #tab-ops .ob-subhead {
   margin: 16px 0 2px;
-  color: #a7acb3;
+  color: rgba(201, 168, 76, .7);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: .01em;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
 }
 #tab-ops .ob-sec .ob-subhead:first-child { margin-top: 0; }
 #tab-ops .ob-empty-line { padding: 6px 0; color: #a7acb3; font-size: 12px; }
