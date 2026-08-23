@@ -579,19 +579,30 @@
 #tab-ops .ob-dispatch-table td:first-child { padding-left: 18px; }
 #tab-ops .ob-dispatch-table td:last-child { padding-right: 18px; }
 
-/* The five flexible columns share what is left after the four fixed ones, so
-   they are stated as fractions of (100% - --ob-fixedcols). Plain percentages
-   summed to 100% *plus* those 188px, and `table-layout: fixed` resolved the
-   overflow by scaling every column down ~16% — which is what clipped the stay
-   cluster mid-word ("7 ni"). */
-#tab-ops .ob-dispatch-table { --ob-fixedcols: 188px; }
+/* Column budget. Two rules of this table decide the numbers below:
+   1. The four control columns are stated in px because they hold fixed-size
+      controls (checkbox, tick, status word, ⋯ button).
+   2. The five flexible columns are plain percentages that deliberately sum to
+      79%, not 100%. Under `table-layout: fixed` a percentage resolves against
+      the whole table, so percentages summing to 100% on top of 188px of px
+      columns over-constrain the row and every column gets scaled down —
+      measured at 1440px that left the stay column at 156px and clipped its
+      text mid-word ("7 ni"). Leaving the px columns their share keeps the
+      widths honest: 188/896 ≈ 21%.
+   Do not restate these as calc((100% - 188px) * n): Chrome treats a calc()
+   percentage on a fixed-layout column as `auto` and falls back to splitting
+   the leftover equally, which measured 142px for all five columns. */
 #tab-ops .ob-c-sel { width: 32px; }
 #tab-ops .ob-c-tick { width: 34px; }
-#tab-ops .ob-c-prop { width: calc((100% - var(--ob-fixedcols)) * .27); }
-#tab-ops .ob-c-stay { width: calc((100% - var(--ob-fixedcols)) * .25); }
-#tab-ops .ob-c-crew { width: calc((100% - var(--ob-fixedcols)) * .16); }
-#tab-ops .ob-c-task { width: calc((100% - var(--ob-fixedcols)) * .11); }
-#tab-ops .ob-c-note { width: calc((100% - var(--ob-fixedcols)) * .21); }
+#tab-ops .ob-c-prop { width: 21%; }
+#tab-ops .ob-c-stay { width: 19.5%; }
+#tab-ops .ob-c-crew { width: 12%; }
+/* 9% left "Cleaning" 43px of content box for 47px of text, so the label sat on
+   its own caret. The point comes from Cleaner rather than Notes: a crew cell
+   holds one short name plus a ＋, while Notes still has to seat a tag, a count
+   and the free-text field. */
+#tab-ops .ob-c-task { width: 10%; }
+#tab-ops .ob-c-note { width: 16.5%; }
 #tab-ops .ob-c-status { width: 92px; }
 #tab-ops .ob-c-act { width: 30px; }
 #tab-ops .ob-center { text-align: center; }
@@ -742,15 +753,29 @@
 #tab-ops .ob-badge.ob-k-owner { background: #faefec; color: #a0524a; }
 #tab-ops .ob-badge.ob-k-arrival { background: #eef2f7; color: #4e6e90; }
 
-/* one human-readable details cluster: check-in · guests · eta */
-#tab-ops .ob-details {
+/* The details read as two lines, mirroring the property cell: what happens
+   today on the lead line, the editable particulars under it. As one line the
+   cluster needed 225px against the ~175px the column can honestly give, and
+   the surplus was hard-clipped mid-word because a flex row cannot ellipsize. */
+#tab-ops .ob-details { overflow: hidden; }
+#tab-ops .ob-det-line {
   display: flex;
   align-items: center;
   gap: 4px;
   overflow: hidden;
-  color: var(--ob-ink-2);
-  font-size: 11px;
   white-space: nowrap;
+}
+#tab-ops .ob-det-lead { color: var(--ob-ink-2); font-size: 11px; line-height: 1.15; }
+#tab-ops .ob-det-sub { color: #a9aeb5; font-size: 10.5px; line-height: 1.15; }
+/* The two inline inputs bring their own intrinsic height; left alone they made
+   the sub line taller than its own text and pushed every row from 28px to 33px,
+   which cost the board three visible rows at 1440x900. */
+#tab-ops .ob-det-sub .ob-inline {
+  height: 13px;
+  min-height: 0;
+  padding: 0 3px;
+  font-size: 10.5px;
+  line-height: 13px;
 }
 #tab-ops .ob-dot-sep { flex: none; color: #c9cdd2; font-size: 10px; }
 #tab-ops .ob-ci {
@@ -890,18 +915,44 @@
   line-height: 1;
 }
 /* The × is a per-chip destructive control; at rest it is dead ink beside every
-   tag, so it only resolves on the row the operator is actually working. */
-#tab-ops .ob-nchip button { opacity: 0; transition: opacity .12s ease; }
-#tab-ops .ob-dispatch-row:hover .ob-nchip button,
-#tab-ops .ob-nchip button:focus-visible { opacity: 1; }
+   tag, so it leaves the layout entirely and gives its ~9px back to the label,
+   returning on the row the operator is actually working. */
+#tab-ops .ob-nchip button { display: none; }
+#tab-ops .ob-dispatch-row:hover .ob-nchip button { display: inline-block; }
 #tab-ops .ob-nchip button:hover { color: var(--ob-red); }
+/* Names things for assistive tech without painting anything — the board has a
+   standing rule against title=, which Chrome renders as a black popup. */
+#tab-ops .ob-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* the count stands in for the tags that would not fit, so it never shrinks */
+#tab-ops .ob-nchip.ob-nmore {
+  flex: none;
+  min-width: 0;
+  padding: 0 6px;
+  background: #e8edf2;
+  color: #5f6c78;
+  cursor: default;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
 /* attention tags read as a flag, not as the gold accent */
 #tab-ops .ob-nchip.hot { background: #faefec; color: #a0524a; font-weight: 500; }
 #tab-ops .ob-nchip.hot button { color: #c79c95; }
 #tab-ops .ob-nchip.cool { background: #eef2f7; color: #4e6e90; }
+/* At rest the field is an invisible affordance, so it only reserves enough to
+   stay clickable and lets the leading tag keep its letters; taking focus it
+   claims real room to type in and the tag ellipsizes for the duration. */
 #tab-ops .ob-row-note {
   flex: 1 1 40px;
-  min-width: 44px;
+  min-width: 34px;
   height: 22px;
   min-height: 22px;
   padding: 0 6px;
@@ -913,7 +964,7 @@
   font-size: 11.5px;
 }
 #tab-ops .ob-row-note:hover { border: 0; background: rgba(22, 40, 58, .04); }
-#tab-ops .ob-row-note:focus { border: 0; background: #ffffff; box-shadow: inset 0 0 0 1px #e4dfd4; color: var(--ob-navy-2); }
+#tab-ops .ob-row-note:focus { border: 0; background: #ffffff; box-shadow: inset 0 0 0 1px #e4dfd4; color: var(--ob-navy-2); min-width: 96px; }
 /* Thirty rows each repeating the word "Note" is chrome, not content. */
 #tab-ops .ob-dispatch-row .ob-row-note::placeholder { color: transparent; }
 #tab-ops .ob-dispatch-row:hover .ob-row-note::placeholder,

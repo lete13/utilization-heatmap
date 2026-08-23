@@ -190,17 +190,25 @@ assert(panel.innerHTML.includes('ob-nchip cool'), 'sofa / Early notes render as 
 // The tag text sits in its own span so a long tag can ellipsize inside the chip
 // without pushing the remove button out of the notes cell.
 // Chips label the tag rather than echo the stored token, so PRIORITY is shown
-// in sentence case while the underlying comment string is left alone.
-assert(/ob-nchip hot"><span>Priority</.test(panel.innerHTML), 'Priority chip is hot/red');
-assert(/ob-nchip hot"><span>Late checkout: 12:00</.test(panel.innerHTML), 'Late chip is hot/red');
-assert(/ob-nchip cool"><span>Prepare 1 sofa bed</.test(panel.innerHTML), 'sofa chip is cool/blue');
-assert(/ob-nchip cool"><span>Early check-in</.test(panel.innerHTML), 'Early chip is cool/blue');
+// in sentence case while the underlying comment string is left alone. The notes
+// column is ~138px wide and also holds the free-text field, so only the leading
+// tag is drawn and the remainder becomes a hover-titled count.
+assert(/ob-nchip hot"><span>Priority</.test(panel.innerHTML), 'the actionable flag leads and is hot/red');
 assert(!/>PRIORITY</.test(panel.innerHTML), 'no chip shouts the raw stored token');
 assert(rows[0].comments.includes('PRIORITY'), 'the stored comment token itself is untouched');
 assert(
   /ob-nchip hot"><span>Priority<\/span><button[^>]*data-ob-flag="priority"/.test(panel.innerHTML),
   'a flag-backed tag stays removable straight from its chip'
 );
+const moreChip = new RegExp(
+  '<span class="ob-nchip ob-nmore"><span aria-hidden="true">\\+(\\d+)</span>' +
+  '<span class="ob-sr">([^<]*)</span></span>'
+).exec(panel.innerHTML);
+assert(moreChip, 'the tags that do not fit collapse into a count');
+assert(Number(moreChip[1]) === 3, 'the count covers the three remaining tags');
+['Late 12:00', 'Prepare 1 sofa bed', 'Early check-in'].forEach((label) => {
+  assert(moreChip[2].includes(label), 'the count names ' + label + ' for assistive tech');
+});
 
 const css = fs.readFileSync(path.join(rootDir, 'fe', 'daily-ops-beta.css'), 'utf8');
 assert(/\.ob-nchip\.hot/.test(css) && /\.ob-nchip\.cool/.test(css), 'note chip color styles present');
@@ -668,21 +676,31 @@ assert(
   /\.ob-dispatch-table td \{[^}]*height:\s*28px[^}]*padding:\s*0 5px/.test(css),
   'list rows keep the prototype density (28px cells, no vertical padding)'
 );
-// The flexible columns must budget around the fixed ones. Bare percentages that
-// summed to 100% on top of 188px of fixed columns made `table-layout: fixed`
-// scale every column down, which clipped the stay cluster mid-word.
+// The flexible columns must leave room for the four px control columns. Two
+// ways of writing this were measured against the live board at 1440px and both
+// clipped the stay cluster mid-word: percentages summing to 100% over-constrain
+// the row (stay collapsed to 156px), and a calc() percentage is treated as
+// `auto` by Chrome under table-layout: fixed, which split the leftover equally
+// (every flexible column came out at 142px).
 const flexCols = ['ob-c-prop', 'ob-c-stay', 'ob-c-crew', 'ob-c-task', 'ob-c-note'].map((cls) => {
   const rule = new RegExp('#tab-ops \\.' + cls + ' \\{[^}]*\\}').exec(css);
   assert(rule, cls + ' declares a width');
-  const share = /calc\(\(100% - var\(--ob-fixedcols\)\) \* \.(\d+)\)/.exec(rule[0]);
-  assert(share, cls + ' budgets around the fixed columns instead of using a bare percentage');
-  return Number('.' + share[1]);
+  assert(!/calc\(/.test(rule[0]), cls + ' avoids calc(): Chrome ignores it on a fixed-layout column');
+  const share = /width:\s*([\d.]+)%/.exec(rule[0]);
+  assert(share, cls + ' is a plain percentage');
+  return Number(share[1]);
 });
+const flexTotal = flexCols.reduce((sum, share) => sum + share, 0);
 assert(
-  Math.abs(flexCols.reduce((sum, share) => sum + share, 0) - 1) < 1e-9,
-  'the flexible column shares add up to exactly the space left over'
+  flexTotal > 74 && flexTotal < 82,
+  'the flexible columns leave the px control columns their ~21% instead of claiming the whole table'
 );
-assert(/--ob-fixedcols:\s*188px/.test(css), 'the fixed-column budget is stated once');
+['ob-c-sel', 'ob-c-tick', 'ob-c-status', 'ob-c-act'].forEach((cls) => {
+  assert(
+    new RegExp('#tab-ops \\.' + cls + ' \\{ width: \\d+px').test(css),
+    cls + ' stays a fixed pixel column because it holds a fixed-size control'
+  );
+});
 assert(
   /@media \(max-width: 1100px\)[^@]*\.ob-dispatch-row td \{[^}]*height:\s*auto/.test(css),
   'the fixed cell height is released once rows become cards'
@@ -746,6 +764,21 @@ assert(
   /if \(seg\.filled && prevFilled\) html \+= '<span class="ob-dot-sep">/.test(betaJs),
   'interpuncts only join segments that actually carry a value'
 );
+// A single line needed 225px against the ~175px the column can give, and a flex
+// row cannot ellipsize, so the surplus was hard-clipped mid-word ("7 ni").
+assert(
+  /class="ob-det-line ob-det-lead"/.test(panel.innerHTML) && /class="ob-det-line ob-det-sub"/.test(panel.innerHTML),
+  'the stay cell reads as a lead line and a sub line rather than one long row'
+);
+const leadLine = /<div class="ob-det-line ob-det-lead">(.*?)<\/div>/.exec(panel.innerHTML);
+assert(leadLine && /ob-ci/.test(leadLine[1]), 'the check-in state leads the stay cell');
+assert(!/ob-row-pax/.test(leadLine[1]), 'the editable particulars are not on the lead line');
+assert(
+  /#tab-ops \.ob-det-lead \{[^}]*font-size:\s*11px/.test(css) &&
+    /#tab-ops \.ob-det-sub \{[^}]*font-size:\s*10\.5px/.test(css),
+  'the sub line is typographically subordinate to the lead line'
+);
+assert(/nights === 1 \? ' night' : ' nights'/.test(betaJs), 'a single night is not written as "1 nights"');
 assert(
   /\(pax \? '<span class="ob-unit">guests<\/span>' : ''\)/.test(betaJs),
   'the "guests" unit is dropped when there is no number beside it'
@@ -760,11 +793,27 @@ assert(
   /\.ob-row-note::placeholder \{ color: transparent/.test(css),
   'the per-row Note placeholder does not repeat down the whole column'
 );
+// The × gives its ~9px back to the label at rest, which is what let the leading
+// tag stop rendering as "Lat…" in a 138px column.
+assert(/#tab-ops \.ob-nchip button \{ display: none/.test(css), 'the × leaves the layout at rest');
 assert(
-  /#tab-ops \.ob-nchip button \{[^}]*opacity:\s*0/.test(css),
-  'tag remove buttons resolve on the row being worked, not on every row'
+  /#tab-ops \.ob-dispatch-row:hover \.ob-nchip button \{ display: inline-block/.test(css),
+  'the × returns on the row being worked'
 );
-assert(/esc\(sentence\(part\)\)/.test(betaJs), 'stored tags are presented in sentence case');
+assert(/\.ob-row-note:focus \{[^}]*min-width:\s*96px/.test(css), 'the note field claims room to type on focus');
+assert(
+  /#tab-ops \.ob-nchip\.ob-nmore \{[^}]*flex:\s*none/.test(css),
+  'the overflow count never shrinks into an ellipsis itself'
+);
+assert(
+  /#tab-ops \.ob-sr \{[^}]*clip-path:\s*inset\(50%\)/.test(css),
+  'the collapsed tag names are visually hidden rather than a tooltip'
+);
+assert(/function chipLabel\(part\)/.test(betaJs), 'chips present a label rather than the stored token');
+assert(
+  /if \(\/\^Long stay\/i\.test\(text\)\) return 'Long stay';/.test(betaJs),
+  'a long-stay tag drops the nights the Stay column already states'
+);
 assert(
   !/\/\^Long stay\/i\.test\(part\)\) return ' hot'/.test(betaJs),
   'a long stay reads as information rather than as an exception'

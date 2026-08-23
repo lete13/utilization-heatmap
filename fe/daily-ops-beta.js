@@ -460,33 +460,78 @@
   }
 
   // Stored tags arrive shouting ("PRIORITY"); the chip is a label, so it is
-  // presented in sentence case while the stored token is left untouched.
+  // presented in sentence case while the stored token is left untouched. The
+  // nights are dropped from a long-stay tag because the Stay column states them
+  // one cell to the left.
+  function chipLabel(part) {
+    var text = String(part || '').trim();
+    if (/^Long stay/i.test(text)) return 'Long stay';
+    var late = /^Late Checkout[:\s]+(.+)$/i.exec(text);
+    if (late) return 'Late ' + late[1].trim();
+    return sentence(text);
+  }
+
+  // The notes column is ~138px wide and also owns the free-text field, so three
+  // chips could only ever be three ellipses ("L… Lon… P…"). One readable chip
+  // plus a count carries the same information; the ⋯ menu remains the full
+  // picture and the count names what it stands for on hover.
   function noteChipsHtml(note, index, extra) {
     var parts = managedParts(note);
     if (!parts.length) return '';
-    return '<div class="ob-nchips">' + parts.map(function (part) {
-      var flag = extra ? '' : flagForPart(part);
-      var remove = flag
-        ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Remove ' + esc(part) + '">×</button>'
-        : '';
-      return '<span class="ob-nchip' + partTone(part) + '"><span>' + esc(sentence(part)) + '</span>' + remove + '</span>';
-    }).join('') + '</div>';
+    // Most actionable first: a flag the operator can clear outranks a fact the
+    // app derived, and only the leading chip has room to stay legible.
+    var ordered = parts.slice().sort(function (a, b) {
+      return (partTone(b) === ' hot' ? 1 : 0) - (partTone(a) === ' hot' ? 1 : 0);
+    });
+    var head = ordered[0];
+    var rest = ordered.slice(1);
+    var flag = extra ? '' : flagForPart(head);
+    var remove = flag
+      ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Remove ' + esc(head) + '">×</button>'
+      : '';
+    // The remainder is named for assistive tech in text rather than a title=,
+    // because Chrome paints that as a black popup that reads like a debug toast.
+    var more = rest.length
+      ? '<span class="ob-nchip ob-nmore"><span aria-hidden="true">+' + rest.length + '</span>' +
+        '<span class="ob-sr">' + esc(rest.map(chipLabel).join(' · ')) + '</span></span>'
+      : '';
+    return '<div class="ob-nchips">' +
+      '<span class="ob-nchip' + partTone(head) + '"><span>' + esc(chipLabel(head)) + '</span>' + remove + '</span>' +
+      more +
+      '</div>';
   }
 
   // ── row pieces ───────────────────────────────────────────────────────────
   // One human-readable cluster instead of four separate columns:
-  //   "Check-in yes · 2 guests · 15:00 · 3 nights"
-  // The check-in state cycles on click; guests and ETA are inline-editable and
-  // stay borderless until they take focus.
+  //   "Check-in yes · 3 nights"
+  //   "2 guests · 15:00"
+  // The lead line says what today does; the sub line carries the two editable
+  // particulars. The check-in state cycles on click; guests and ETA are
+  // inline-editable and stay borderless until they take focus.
+  // An interpunct only ever joins two segments that carry a value. Separating
+  // the empty slots too left a trail of "· — · —" behind most rows and, once
+  // the column was tight, pushed the real values out of view.
+  function joinSegs(segs) {
+    var html = '';
+    var prevFilled = false;
+    segs.forEach(function (seg) {
+      if (seg.filled && prevFilled) html += '<span class="ob-dot-sep">·</span>';
+      html += seg.html;
+      if (seg.filled) prevFilled = true;
+    });
+    return html;
+  }
+
   function detailsHtml(item) {
     var row = item.row || {};
     var index = item.index;
+    var lead = [];
     var segs = [];
 
     if (item.extra) {
-      segs.push({ filled: true, html: '<span class="ob-ci ob-static">Extra clean</span>' });
+      lead.push({ filled: true, html: '<span class="ob-ci ob-static">Extra clean</span>' });
     } else if (isArrivalOnly(row)) {
-      segs.push({ filled: true, html: '<span class="ob-ci ob-yes ob-static">Arrival</span>' });
+      lead.push({ filled: true, html: '<span class="ob-ci ob-yes ob-static">Arrival</span>' });
     } else {
       var stateName = row.checkinSameDay || 'unknown';
       var cfg = stateName === 'yes'
@@ -494,10 +539,18 @@
         : stateName === 'no'
           ? { cls: '', text: 'Check-in no' }
           : { cls: 'ob-unknown', text: 'Check-in unknown' };
-      segs.push({
+      lead.push({
         filled: true,
         html: '<button type="button" class="ob-ci ' + cfg.cls + '" data-ob-action="checkin" data-ob-index="' + index +
           '" aria-label="' + esc(cfg.text) + ' — click to cycle">' + esc(cfg.text) + '</button>'
+      });
+    }
+
+    if (!item.extra && row.nextNights && (row.checkinSameDay === 'yes' || isArrivalOnly(row))) {
+      var nights = Number(row.nextNights);
+      lead.push({
+        filled: true,
+        html: '<span class="ob-nights">' + esc(row.nextNights) + (nights === 1 ? ' night' : ' nights') + '</span>'
       });
     }
 
@@ -528,21 +581,10 @@
       });
     }
 
-    if (!item.extra && row.nextNights && (row.checkinSameDay === 'yes' || isArrivalOnly(row))) {
-      segs.push({ filled: true, html: '<span class="ob-nights">' + esc(row.nextNights) + ' nights</span>' });
-    }
-
-    // An interpunct only ever joins two segments that carry a value. Separating
-    // the empty slots too left a trail of "· — · —" behind most rows and, once
-    // the column was tight, pushed the real values out of view.
-    var html = '';
-    var prevFilled = false;
-    segs.forEach(function (seg) {
-      if (seg.filled && prevFilled) html += '<span class="ob-dot-sep">·</span>';
-      html += seg.html;
-      if (seg.filled) prevFilled = true;
-    });
-    return '<div class="ob-details">' + html + '</div>';
+    return '<div class="ob-details">' +
+      '<div class="ob-det-line ob-det-lead">' + joinSegs(lead) + '</div>' +
+      '<div class="ob-det-line ob-det-sub">' + joinSegs(segs) + '</div>' +
+      '</div>';
   }
 
   var FLAG_DEFS = [
