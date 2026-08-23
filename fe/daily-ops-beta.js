@@ -1,13 +1,19 @@
-/* Daily Ops — dispatch console
+/* Daily Ops v2 — the approved design, wired to the live data layer.
  *
- * Renders into #tab-ops and replaces classic renderOps(). Shares S.daily /
- * _ops* persistence with the rest of the app (cleaners, staff, crew poster).
+ * Renders into #tab-ops and replaces classic renderOps(). Every number, row,
+ * cleaner and staff block on screen comes from the real app state (S.daily,
+ * _opsRows / _opsAutoRows via _opsLoadData, _opsPrepareCleanDay, …) — this file
+ * owns presentation and interaction only, never its own copy of the data.
  *
  * Structure
  * ---------
- *   .ob-command   day bar   — date, progress, KPIs, save state, share menu
- *   .ob-rail      triage    — discriminating segments + search + sort + grouping
- *   .ob-page      body      — tasks, schedule check, bulk bar, board, aux panels
+ *   .ob-command   slim top bar  — wordmark, title, day nav, save state, panel
+ *   .ob-cards     summary       — open tasks (largest, first), progress ring,
+ *                                 unassigned, arrivals
+ *   .ob-rail      filters       — discriminating chips + search + group + sort
+ *   .ob-list      the board     — dense grouped rows inside the capture wrapper
+ *   .ob-panel     side panel    — cleaners, staff, routes, notes, schedule
+ *                                 check (#ops-schedcheck), export
  *
  * Rendering contract: the whole tab is produced as ONE innerHTML string and all
  * interaction runs through delegated [data-ob-action] handlers bound once on the
@@ -37,10 +43,11 @@
     group: 'area', // 'area' | 'cleaner' | 'none'
     menuFor: '', // row id whose ⋯ actions menu is open
     assignFor: '', // row id whose crew popover is open
-    barMenu: false, // day-bar share/actions menu
     composer: false, // inline task composer
     draftText: '',
     draftApt: '',
+    panelOpen: true, // docked side panel (desktop)
+    drawerOpen: false, // overlay drawer (tablet / phone)
   };
 
   var state = window._opsBetaState = window._opsBetaState || {};
@@ -50,9 +57,12 @@
     if (Object.prototype.hasOwnProperty.call(DEFAULTS, dk) && state[dk] === undefined) state[dk] = DEFAULTS[dk];
   }
   if (!state.selected) state.selected = {};
-  // Disclosure state has to live here: a full repaint rebuilds every <details>,
-  // so a natively-open panel would snap shut on the next render.
-  if (!state.open || typeof state.open !== 'object') state.open = { tasks: false, staff: false, notes: false };
+  // Section disclosure has to live here: a full repaint rebuilds the panel, so
+  // an open section would snap shut on the next render. The marker lets a state
+  // object left behind by an older layout be replaced rather than half-merged.
+  if (!state.open || state.open.v2 !== true) {
+    state.open = { v2: true, cleaners: true, staff: true, routes: false, notes: true, sched: true, exports: true };
+  }
   if (state.pageSize == null) state.pageSize = 0;
   if (!state.page) state.page = 1;
 
@@ -87,7 +97,18 @@
     return (typeof _opsTodayStr === 'function') ? _opsTodayStr() : new Date().toISOString().slice(0, 10);
   }
 
+  // The shared helper renders Greek weekday/month names; the redesign is
+  // English-only, so format locally and keep the helper as the fallback.
   function dateLabel(value) {
+    var parts = String(value || '').split('-');
+    if (parts.length === 3) {
+      var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      if (!isNaN(d.getTime())) {
+        try {
+          return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        } catch (e) { /* fall through to the shared helper */ }
+      }
+    }
     if (typeof _opsDayLabel === 'function') return _opsDayLabel(value);
     if (typeof _opsFmtDate === 'function') return _opsFmtDate(value);
     return value;
@@ -115,11 +136,19 @@
     return (row && typeof _opsKindOf === 'function') ? _opsKindOf(row) : null;
   }
 
+  // Sentence case reads as part of the design language; OPS_KINDS ships its
+  // labels in shouting caps for the legacy square buttons.
+  function sentence(text) {
+    var raw = String(text || '').trim();
+    if (!raw) return '';
+    return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+  }
+
   function cleanType(row) {
     var t = String((row && row.cleanType) || 'turnover');
-    if (t === 'refresh') return { label: 'REFRESH', cls: 'ob-blue' };
-    if (t === 'sofa_bed') return { label: 'SOFA', cls: 'ob-red' };
-    return { label: 'TURNOVER', cls: 'ob-green' };
+    if (t === 'refresh') return { label: 'Refresh', cls: 'ob-k-preparation', exception: true };
+    if (t === 'sofa_bed') return { label: 'Sofa bed', cls: 'ob-k-owner', exception: true };
+    return { label: 'Turnover', cls: '', exception: false };
   }
 
   function taskList() {
@@ -128,18 +157,24 @@
       : [['katharismos', 'Καθαρισμός'], ['prepare_sofa', 'Prepare sofa bed'], ['episkeui', 'Επισκευή βλάβης'], ['extra', 'Extra']];
   }
 
-  function taskOptions(current) {
-    return taskList().map(function (item) {
-      return '<option value="' + esc(item[0]) + '"' + (String(current || 'katharismos') === String(item[0]) ? ' selected' : '') + '>' + esc(item[1]) + '</option>';
-    }).join('');
+  // OPS_CLEAN_TASKS ships Greek labels on the shared (untouchable) data layer.
+  // Values stay verbatim so writes keep the same contract; only display text
+  // is translated, and unknown keys fall back to whatever the data layer says.
+  var TASK_LABELS = {
+    katharismos: 'Cleaning',
+    prepare_sofa: 'Prepare sofa bed',
+    episkeui: 'Repair',
+    extra: 'Extra'
+  };
+
+  function taskLabel(value, fallback) {
+    return TASK_LABELS[String(value)] || fallback || String(value);
   }
 
-  function initials(name) {
-    var t = String(name || '').trim();
-    if (!t) return '?';
-    var parts = t.split(/\s+/);
-    if (parts.length > 1) return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
-    return t.slice(0, 2).toUpperCase();
+  function taskOptions(current) {
+    return taskList().map(function (item) {
+      return '<option value="' + esc(item[0]) + '"' + (String(current || 'katharismos') === String(item[0]) ? ' selected' : '') + '>' + esc(taskLabel(item[0], item[1])) + '</option>';
+    }).join('');
   }
 
   // ── saving ───────────────────────────────────────────────────────────────
@@ -157,7 +192,7 @@
       if (typeof _opsSaveNow === 'function') _opsSaveNow();
       else if (typeof save === 'function') save();
       if (immediateDb && typeof saveToDb === 'function' && typeof _dbAvailable !== 'undefined' && _dbAvailable) saveToDb();
-      setSaveState('Saved ' + new Date().toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' }), true);
+      setSaveState('Saved ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }), true);
     } catch (e) {
       setSaveState('Save failed: ' + (e.message || e), false);
     }
@@ -175,7 +210,7 @@
   // before, restore after. Everything is feature-detected so the render path
   // still runs in the bare test context.
   function captureContext() {
-    var snap = { scroll: null, focus: '', start: null, end: null };
+    var snap = { scroll: null, focus: '', start: null, end: null, panel: null, segs: null };
     try {
       if (typeof window !== 'undefined' && typeof window.scrollY === 'number') snap.scroll = window.scrollY;
       var active = (typeof document !== 'undefined') ? document.activeElement : null;
@@ -186,6 +221,12 @@
           snap.end = active.selectionEnd;
         }
       }
+      // The panel scrolls on its own and the filter chips scroll sideways, so
+      // both would silently jump back to the start on every repaint.
+      var panel = document.getElementById('ops-beta-panel');
+      if (panel) snap.panel = panel.scrollTop;
+      var segs = document.getElementById('ops-beta-segs');
+      if (segs) snap.segs = segs.scrollLeft;
     } catch (e) {}
     return snap;
   }
@@ -194,6 +235,10 @@
     if (!snap) return;
     try {
       if (snap.scroll != null && typeof window.scrollTo === 'function') window.scrollTo(0, snap.scroll);
+      var panel = document.getElementById('ops-beta-panel');
+      if (panel && snap.panel != null) panel.scrollTop = snap.panel;
+      var segs = document.getElementById('ops-beta-segs');
+      if (segs && snap.segs != null) segs.scrollLeft = snap.segs;
     } catch (e) {}
     if (!snap.focus) return;
     try {
@@ -207,7 +252,6 @@
       }
     } catch (e) {}
   }
-
 
   // ── item model ───────────────────────────────────────────────────────────
   function mainAndExtras() {
@@ -334,13 +378,13 @@
   function groupLabelFor(item) {
     if (state.group === 'cleaner') {
       var names = cleaners(item.target);
-      return names.length ? names.join(' · ') : 'Χωρίς συνεργείο';
+      return names.length ? names.join(' · ') : 'No cleaner assigned';
     }
     var area = '';
     if (typeof window.aptAreaLabel === 'function' && typeof _opsAptOf === 'function') {
       area = window.aptAreaLabel(_opsAptOf(item.row)) || '';
     }
-    return area || 'Χωρίς περιοχή';
+    return area || 'No area';
   }
 
   function groupItems(items) {
@@ -419,52 +463,63 @@
     return '<div class="ob-nchips">' + parts.map(function (part) {
       var flag = extra ? '' : flagForPart(part);
       var remove = flag
-        ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Αφαίρεση">×</button>'
+        ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Remove ' + esc(part) + '">×</button>'
         : '';
-      return '<span class="ob-nchip' + partTone(part) + '">' + esc(part) + remove + '</span>';
+      return '<span class="ob-nchip' + partTone(part) + '"><span>' + esc(part) + '</span>' + remove + '</span>';
     }).join('') + '</div>';
   }
 
   // ── row pieces ───────────────────────────────────────────────────────────
-  function checkinHtml(row, index) {
-    if (row.isCheckinOnly || row.checkinSameDay === 'checkin_only') {
-      return '<span class="ob-chip ob-blue">Άφιξη' + (row.nextNights ? ' · ' + esc(row.nextNights) + ' νύχτες' : '') + '</span>';
+  // One human-readable cluster instead of four separate columns:
+  //   "Check-in yes · 2 guests · 15:00 · 3 nights"
+  // The check-in state cycles on click; guests and ETA are inline-editable and
+  // stay borderless until they take focus.
+  function detailsHtml(item) {
+    var row = item.row || {};
+    var index = item.index;
+    var out = [];
+
+    if (item.extra) {
+      out.push('<span class="ob-ci ob-static">Extra clean</span>');
+    } else if (isArrivalOnly(row)) {
+      out.push('<span class="ob-ci ob-yes ob-static">Arrival</span>');
+    } else {
+      var stateName = row.checkinSameDay || 'unknown';
+      var cfg = stateName === 'yes'
+        ? { cls: 'ob-yes', text: 'Check-in yes' }
+        : stateName === 'no'
+          ? { cls: '', text: 'Check-in no' }
+          : { cls: 'ob-unknown', text: 'Check-in unknown' };
+      out.push('<button type="button" class="ob-ci ' + cfg.cls + '" data-ob-action="checkin" data-ob-index="' + index +
+        '" aria-label="' + esc(cfg.text) + ' — click to cycle">' + esc(cfg.text) + '</button>');
     }
-    var stateName = row.checkinSameDay || 'unknown';
-    var cfg = stateName === 'yes'
-      ? { cls: 'ob-green', text: 'Ναι' + (row.nextNights ? ' · ' + row.nextNights + ' νύχτες' : '') }
-      : stateName === 'no'
-        ? { cls: 'ob-red', text: 'Όχι' }
-        : { cls: 'ob-amber', text: 'Δεν ξέρουμε' };
-    return '<button class="ob-chip ob-checkin ' + cfg.cls + '" data-ob-action="checkin" data-ob-index="' + index + '" aria-label="Εναλλαγή check-in">' + esc(cfg.text) + '</button>';
+
+    if (item.extra) {
+      out.push('<span class="ob-paxwrap"><span class="ob-inline">' + esc(row.people || '—') + '</span><span class="ob-unit">guests</span></span>');
+    } else {
+      out.push('<span class="ob-paxwrap">' +
+        '<input class="ob-input ob-inline ob-row-pax" type="number" min="0" max="20" value="' + esc(row.people || '') +
+        '" data-ob-action="row-field" data-ob-index="' + index + '" data-ob-field="people" data-ob-focus="pax:' + index +
+        '" placeholder="—" aria-label="Guests"><span class="ob-unit">guests</span></span>');
+      var eta = String(row.arrivalTime || '');
+      out.push('<input class="ob-input ob-inline ob-row-eta' + (eta ? '' : ' ob-eta-empty') + '" value="' + esc(eta) +
+        '" data-ob-action="row-field" data-ob-index="' + index + '" data-ob-field="arrivalTime" data-ob-focus="eta:' + index +
+        '" placeholder="—" aria-label="Arrival time">');
+    }
+
+    if (!item.extra && row.nextNights && (row.checkinSameDay === 'yes' || isArrivalOnly(row))) {
+      out.push('<span class="ob-nights">' + esc(row.nextNights) + ' nights</span>');
+    }
+
+    return '<div class="ob-details">' + out.join('<span class="ob-dot-sep">·</span>') + '</div>';
   }
 
   var FLAG_DEFS = [
-    ['late', '⏰', 'Late checkout', 'lateCheckout', 'hot'],
-    ['priority', '❗', 'Priority', 'isPriority', 'hot'],
-    ['park', '👶', 'Παρκοκρεβάτο', 'parkBed', 'cool'],
-    ['early', '☀️', 'Early check-in', 'earlyCheckin', 'cool'],
+    ['late', '⏰', 'Late checkout', 'lateCheckout'],
+    ['priority', '❗', 'Priority', 'isPriority'],
+    ['park', '👶', 'Park bed', 'parkBed'],
+    ['early', '☀️', 'Early check-in', 'earlyCheckin'],
   ];
-
-  // Only ACTIVE signals get a cell. Setting an inactive flag happens in the row
-  // ⋯ menu, which is what removes ~4 permanent buttons from every single row.
-  function signalsHtml(row, index, extra) {
-    if (extra) return '<span class="ob-row-muted">—</span>';
-    var html = FLAG_DEFS.filter(function (f) {
-      // A same-day auto priority is true on most of the board, so it renders as
-      // a quiet solid icon instead of a labelled chip.
-      return row[f[3]] && !(f[0] === 'priority' && !escalated(row));
-    }).map(function (f) {
-      return '<button type="button" class="ob-sig ' + f[4] + '" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + f[0] + '" aria-label="' + esc(f[2]) + ' — κλικ για αφαίρεση">' + f[1] + ' ' + esc(f[2]) + '</button>';
-    }).join('');
-    if (row.isPriority && !escalated(row)) {
-      html += '<button type="button" class="ob-mini-flag hot on" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="priority" aria-label="Priority (αυτόματο same-day)">❗</button>';
-    }
-    if (row.checkinSameDay === 'unknown') {
-      html += '<span class="ob-chip ob-amber">? check-in</span>';
-    }
-    return '<div class="ob-row-flags">' + (html || '<span class="ob-row-muted">—</span>') + '</div>';
-  }
 
   function rowToneClass(item) {
     var row = (item && item.row) || {};
@@ -476,6 +531,21 @@
     if (row.checkinSameDay === 'unknown') return 'tone-warn';
     if (isArrivalOnly(row) || row.checkinSameDay === 'yes' || row.earlyCheckin) return 'tone-same';
     return 'tone-open';
+  }
+
+  // Status always reads as a coloured dot AND a word — the colour alone was
+  // never enough, and the word alone lost the at-a-glance scan.
+  function statusOf(item) {
+    var row = item.row || {};
+    var target = item.target;
+    if (target && target.cleanDone) return { cls: 'done', word: 'Done' };
+    if (!target && !isArrivalOnly(row)) return { cls: 'excluded', word: 'No clean' };
+    // "Unassigned" is the more actionable read of an unstaffed row, and it has
+    // its own rail segment; reserve the blocking word for the other causes so
+    // the status column keeps discriminating. The Blocking filter is unchanged.
+    if (target && !cleaners(target).length) return { cls: 'unassigned', word: 'Unassigned' };
+    if (itemBlocking(item)) return { cls: 'blocking', word: 'Blocking' };
+    return { cls: 'ready', word: 'Ready' };
   }
 
   function cleanerRoster() {
@@ -501,7 +571,7 @@
 
   // Assigning crew is the primary action on this board, so it gets a real
   // popover that shows today's load per person instead of a bare datalist.
-  function assignPopHtml(key, load) {
+  function assignPopHtml(key, load, assigned) {
     var roster = cleanerRoster();
     var peak = 1;
     roster.forEach(function (name) { peak = Math.max(peak, load[name] || 0); });
@@ -509,15 +579,17 @@
       var n = load[name] || 0;
       var pct = Math.round((n / peak) * 100);
       var band = n === 0 || n <= peak / 3 ? ' ob-low' : (n >= peak ? ' ob-high' : '');
+      var has = assigned.indexOf(name) >= 0;
       return '<button type="button" class="ob-pop-row" data-ob-action="assign-pick" data-ob-key="' + encoded(key) + '" data-ob-name="' + esc(name) + '">' +
-        '<span class="ob-av">' + esc(initials(name)) + '</span>' +
-        '<span class="ob-nm">' + esc(name) + '</span>' +
+        '<span class="ob-mi-state">' + (has ? '✓' : '') + '</span>' +
+        '<span class="ob-nm-txt">' + esc(name) + '</span>' +
         '<span class="ob-ld' + band + '"><u><b style="width:' + pct + '%"></b></u>' + n + '</span>' +
         '</button>';
     }).join('');
     return '<div class="ob-pop">' +
-      '<h6>Ανάθεση συνεργείου · φόρτος ημέρας</h6>' + rows +
-      '<input class="ob-input ob-row-cleaner" list="ops-beta-cleaners" value="" placeholder="Καθαρίστρια…" data-ob-action="cleaner-add" data-ob-focus="assign:' + esc(key) + '" data-ob-key="' + encoded(key) + '">' +
+      '<h6>Assign cleaner · workload today</h6>' +
+      (rows || '<div class="ob-pop-empty">No cleaners on the roster yet.</div>') +
+      '<input class="ob-input" list="ops-beta-cleaners" value="" placeholder="Add cleaner…" data-ob-action="cleaner-add" data-ob-focus="assign:' + esc(key) + '" data-ob-key="' + encoded(key) + '" aria-label="Add cleaner">' +
       '</div>';
   }
 
@@ -529,16 +601,17 @@
     var names = cleaners(target);
     var open = state.assignFor === id;
     var chips = names.map(function (nm, ni) {
-      return '<span class="ob-cchip">' + esc(nm) +
-        '<button type="button" data-ob-action="cleaner-remove" data-ob-key="' + encoded(key) + '" data-ob-idx="' + ni + '" aria-label="Αφαίρεση">×</button></span>';
+      return '<span class="ob-cchip"><span>' + esc(nm) + '</span>' +
+        '<button type="button" data-ob-action="cleaner-remove" data-ob-key="' + encoded(key) + '" data-ob-idx="' + ni + '" aria-label="Remove ' + esc(nm) + '">×</button></span>';
     }).join('');
+    // One uniform navy-tinted pill with a hairline — never dashed, never gold.
     var trigger = names.length
-      ? '<button type="button" class="ob-cadd" data-ob-action="assign-open" data-ob-id="' + encoded(id) + '" aria-label="Προσθήκη ατόμου">+</button>'
-      : '<button type="button" class="ob-assign" data-ob-action="assign-open" data-ob-id="' + encoded(id) + '">+ Ανάθεση</button>';
+      ? '<button type="button" class="ob-assign ob-plus" data-ob-action="assign-open" data-ob-id="' + encoded(id) + '" aria-label="Assign another cleaner">＋</button>'
+      : '<button type="button" class="ob-assign" data-ob-action="assign-open" data-ob-id="' + encoded(id) + '">Assign</button>';
     return '<div class="ob-cchips-wrap">' +
       (chips ? '<div class="ob-cchips">' + chips + '</div>' : '') +
       trigger +
-      (open ? assignPopHtml(key, load) : '') +
+      (open ? assignPopHtml(key, load, names) : '') +
       '</div>';
   }
 
@@ -570,14 +643,14 @@
     var kindButtons = kinds.map(function (kind) {
       return menuItemHtml(
         'data-ob-action="kind" data-ob-index="' + item.index + '" data-ob-kind="' + esc(kind.key) + '"',
-        '', kind.label || kind.key, !!row[kind.key]
+        '', sentence(kind.label || kind.key), !!row[kind.key]
       );
     }).join('');
     return '<div class="ob-menu">' +
-      '<h6>Σήματα</h6>' + flagButtons +
-      (kindButtons ? '<hr><h6>Τύπος κράτησης</h6>' + kindButtons : '') +
+      '<h6>Flags</h6>' + flagButtons +
+      (kindButtons ? '<hr><h6>Kind override</h6>' + kindButtons : '') +
       '<hr>' +
-      menuItemHtml('data-ob-action="row-remove" data-ob-index="' + item.index + '"', '🗑', 'Αφαίρεση γραμμής', false, 'ob-danger') +
+      menuItemHtml('data-ob-action="row-remove" data-ob-index="' + item.index + '"', '×', 'Remove row', false, 'ob-danger') +
       '</div>';
   }
 
@@ -591,55 +664,46 @@
     var area = (typeof window.aptAreaLabel === 'function' && typeof _opsAptOf === 'function') ? window.aptAreaLabel(_opsAptOf(row)) : '';
     var type = target ? cleanType(target) : null;
     var kind = kindOf(row);
-    var names = cleaners(target).join(', ');
     var note = String(row.comments || row.cleanTaskNote || '');
-    var keyAttr = target ? ' data-ob-key="' + encoded(item.key) + '"' : '';
-    var statusClass = done ? 'done' : (!target ? 'excluded' : (!names ? 'unassigned' : 'open'));
+    var status = statusOf(item);
     var toneClass = rowToneClass(item);
-    var statusText = done ? 'DONE' : (!target ? 'NO CLEAN' : (!names ? 'UNASSIGNED' : 'OPEN'));
-    var checkin = item.extra ? '<span class="ob-row-muted">—</span>' : checkinHtml(row, item.index);
+
+    // Only exceptions earn a coloured badge; the type always stays readable on
+    // the sub line so nothing is dropped for the common turnover case.
+    var badges = (kind ? '<span class="ob-badge ob-k-' + esc(String(kind.key || '').replace(/^is/, '').toLowerCase()) + '">' + esc(sentence(kind.label)) + '</span>' : '') +
+      (row.isOwner ? '<span class="ob-badge ob-k-owner">Owner</span>' : '') +
+      (isArrivalOnly(row) ? '<span class="ob-badge ob-k-arrival">Arrival only</span>' : '') +
+      (type && type.exception ? '<span class="ob-badge ' + type.cls + '">' + esc(type.label) + '</span>' : '');
+    var sub = [type ? type.label : 'No clean', area, lines.addr].filter(Boolean).join(' · ');
+
+    // In card mode every cell becomes its own line, so a cell holding nothing
+    // but an em-dash placeholder is dead weight — flag it for the card tiers.
+    var blank = target ? '' : ' ob-cell-empty';
     var cleanControl = target
-      ? '<input class="ob-clean-check" type="checkbox" data-ob-action="clean" data-ob-key="' + encoded(item.key) + '"' + (done ? ' checked' : '') + ' aria-label="Καθαρίστηκε">'
+      ? '<button type="button" class="ob-tick' + (done ? ' ob-on' : '') + '" data-ob-action="clean" data-ob-key="' + encoded(item.key) + '" aria-pressed="' + (done ? 'true' : 'false') + '" aria-label="Mark clean">✓</button>'
       : '<span class="ob-row-muted">—</span>';
-    var cleanerControl = cleanerChipsHtml(item, load);
     var taskControl = target
-      ? '<select class="ob-select ob-row-task" data-ob-action="clean-field" data-ob-key="' + encoded(item.key) + '" data-ob-field="cleanTask" data-ob-focus="task:' + esc(item.key) + '">' + taskOptions(target.cleanTask) + '</select>'
+      ? '<select class="ob-select ob-row-task" data-ob-action="clean-field" data-ob-key="' + encoded(item.key) + '" data-ob-field="cleanTask" data-ob-focus="task:' + esc(item.key) + '" aria-label="Task">' + taskOptions(target.cleanTask) + '</select>'
       : '<span class="ob-row-muted">—</span>';
-    var paxControl = item.extra
-      ? '<span class="ob-row-muted">' + esc(row.people || '—') + '</span>'
-      : '<input class="ob-input ob-row-pax" type="number" min="0" max="20" value="' + esc(row.people || '') + '" data-ob-action="row-field" data-ob-index="' + item.index + '" data-ob-field="people" data-ob-focus="pax:' + item.index + '" placeholder="—" aria-label="Άτομα">';
-    var etaControl = item.extra
-      ? '<span class="ob-row-muted">—</span>'
-      : '<input class="ob-input ob-row-eta" value="' + esc(row.arrivalTime || '') + '" data-ob-action="row-field" data-ob-index="' + item.index + '" data-ob-field="arrivalTime" data-ob-focus="eta:' + item.index + '" placeholder="ETA" aria-label="Ώρα άφιξης">';
     var noteInput = item.extra
-      ? '<input class="ob-input ob-row-note" value="' + esc(freeNoteText(note)) + '" data-ob-action="clean-field" data-ob-key="' + encoded(item.key) + '" data-ob-field="comments" data-ob-focus="note:' + esc(item.key) + '" placeholder="Σημείωση…">'
-      : '<input class="ob-input ob-row-note" value="' + esc(freeNoteText(note)) + '" data-ob-action="comment" data-ob-index="' + item.index + '"' + keyAttr + ' data-ob-focus="note:' + item.index + '" placeholder="Σημείωση…">';
-    var noteControl = '<div class="ob-note-cell">' + noteChipsHtml(note, item.index, item.extra) + noteInput + '</div>';
-    var badges = (type ? '<span class="ob-row-type ' + type.cls + '">' + esc(type.label) + '</span>' : '') +
-      (kind ? '<span class="ob-row-type ob-amber">' + esc(kind.label) + '</span>' : '') +
-      (row.isOwner ? '<span class="ob-row-type ob-red">OWNER</span>' : '');
-    var stayLabel = row.isCheckinOnly ? 'Μόνο άφιξη' : 'CO';
-    // Card mode hides cells that carry nothing, so a bare arrival does not
-    // spend four empty bands of vertical space.
-    var emptySig = item.extra || !(row.lateCheckout || row.parkBed || row.earlyCheckin || row.isPriority || row.checkinSameDay === 'unknown');
-    var emptyCrew = !target;
-    var emptyTask = !target;
+      ? '<input class="ob-input ob-row-note" value="' + esc(freeNoteText(note)) + '" data-ob-action="clean-field" data-ob-key="' + encoded(item.key) + '" data-ob-field="comments" data-ob-focus="note:' + esc(item.key) + '" placeholder="Note" aria-label="Note">'
+      : '<input class="ob-input ob-row-note" value="' + esc(freeNoteText(note)) + '" data-ob-action="comment" data-ob-index="' + item.index + '"' +
+        (target ? ' data-ob-key="' + encoded(item.key) + '"' : '') + ' data-ob-focus="note:' + item.index + '" placeholder="Note" aria-label="Note">';
     var menuOpen = state.menuFor === id;
     var actions = item.extra
       ? ''
-      : '<button type="button" class="ob-rowmenu-btn" data-ob-action="row-menu" data-ob-id="' + encoded(id) + '" aria-label="Ενέργειες γραμμής">⋯</button>' +
+      : '<button type="button" class="ob-rowmenu-btn' + (menuOpen ? ' ob-on' : '') + '" data-ob-action="row-menu" data-ob-id="' + encoded(id) + '" aria-label="Row actions" aria-haspopup="true">⋯</button>' +
         (menuOpen ? rowMenuHtml(item) : '');
 
-    return '<tr class="ob-dispatch-row ' + statusClass + ' ' + toneClass + (selected ? ' selected' : '') + '" data-ob-id="' + encoded(id) + '">' +
-      '<td class="ob-c-sel ob-center"><input type="checkbox" class="ob-sel-check" data-ob-action="select" data-ob-id="' + encoded(id) + '"' + (selected ? ' checked' : '') + (target ? '' : ' disabled') + ' aria-label="Επιλογή ' + esc(lines.name || row.aptName) + '"></td>' +
-      '<td class="ob-c-tick ob-center">' + cleanControl + '</td>' +
-      '<td class="ob-c-prop ob-property-cell"><div class="ob-property-line"><span class="ob-num">' + displayNumber + '</span><b>' + esc(lines.name || row.aptName || 'Apartment') + '</b>' + badges + '</div><small>' + esc([area, lines.addr].filter(Boolean).join(' · ')) + '</small></td>' +
-      '<td class="ob-c-stay"><div class="ob-stay-line"><span class="ob-stay-co">' + stayLabel + '</span>' + checkin + '</div><div class="ob-stay-line">' + paxControl + etaControl + '</div></td>' +
-      '<td class="ob-c-sig' + (emptySig ? ' ob-cell-empty' : '') + '">' + signalsHtml(row, item.index, item.extra) + '</td>' +
-      '<td class="ob-c-crew' + (emptyCrew ? ' ob-cell-empty' : '') + '">' + cleanerControl + '</td>' +
-      '<td class="ob-c-task' + (emptyTask ? ' ob-cell-empty' : '') + '">' + taskControl + '</td>' +
-      '<td class="ob-c-note">' + noteControl + '</td>' +
-      '<td class="ob-c-status"><span class="ob-row-status ' + statusClass + '"><i></i>' + statusText + '</span></td>' +
+    return '<tr class="ob-dispatch-row ' + status.cls + ' ' + toneClass + (selected ? ' selected' : '') + '" data-ob-id="' + encoded(id) + '">' +
+      '<td class="ob-c-sel ob-center"><input type="checkbox" class="ob-sel-check" data-ob-action="select" data-ob-id="' + encoded(id) + '"' + (selected ? ' checked' : '') + (target ? '' : ' disabled') + ' aria-label="Select ' + esc(lines.name || row.aptName) + '"></td>' +
+      '<td class="ob-c-tick ob-center' + blank + '">' + cleanControl + '</td>' +
+      '<td class="ob-c-prop"><div class="ob-nm"><span class="ob-num">' + displayNumber + '</span><b>' + esc(lines.name || row.aptName || 'Apartment') + '</b>' + badges + '</div><div class="ob-sub">' + esc(sub) + '</div></td>' +
+      '<td class="ob-c-stay">' + detailsHtml(item) + '</td>' +
+      '<td class="ob-c-crew' + blank + '">' + cleanerChipsHtml(item, load) + '</td>' +
+      '<td class="ob-c-task' + blank + '">' + taskControl + '</td>' +
+      '<td class="ob-c-note"><div class="ob-note-cell">' + noteChipsHtml(note, item.index, item.extra) + noteInput + '</div></td>' +
+      '<td class="ob-c-status"><span class="ob-row-status ' + status.cls + '"><i></i>' + status.word + '</span></td>' +
       '<td class="ob-c-act ob-act-cell">' + actions + '</td>' +
       '</tr>';
   }
@@ -647,71 +711,64 @@
   function groupRowHtml(group, colspan) {
     var total = group.items.length;
     var done = group.items.filter(function (i) { return i.target && i.target.cleanDone; }).length;
-    var crew = {};
-    group.items.forEach(function (i) { cleaners(i.target).forEach(function (n) { crew[n] = true; }); });
-    var crewCount = Object.keys(crew).length;
-    var pct = total ? Math.round((done * 100) / total) : 0;
     return '<tr class="ob-grp"><td colspan="' + colspan + '"><div class="ob-grp-line">' +
-      '<span>' + esc(group.label) + '</span>' +
-      '<em>' + total + ' ακίνητα · ' + crewCount + ' συνεργεία</em>' +
-      '<span class="ob-spacer"></span>' +
-      '<span class="ob-grp-bar"><span style="width:' + pct + '%"></span></span>' +
-      '<em>' + done + '/' + total + '</em>' +
+      '<b>' + esc(group.label) + '</b>' +
+      '<em>' + total + (total === 1 ? ' property' : ' properties') + '</em>' +
+      '<span class="ob-gclean' + (total && done === total ? ' ob-allclean' : '') + '">' + done + '/' + total + ' clean</span>' +
       '</div></td></tr>';
   }
 
   // ── chrome ───────────────────────────────────────────────────────────────
+  // Contextual by design: the bar only exists while rows are selected.
   function bulkBarHtml(filtered, allItems) {
-    var selected = selectedItems(allItems);
-    var count = selected.length;
+    var count = selectedItems(allItems).length;
+    if (!count) return '';
     var actionable = filtered.filter(function (item) { return !!item.target; });
     var allFilteredSelected = !!actionable.length && actionable.every(function (item) { return !!state.selected[itemId(item)]; });
-    var roster = cleanerRoster();
-    var options = '<option value="">Assign cleaner…</option>' + roster.map(function (name) {
+    var options = '<option value="">Assign cleaner…</option>' + cleanerRoster().map(function (name) {
       return '<option value="' + esc(name) + '">' + esc(name) + '</option>';
     }).join('');
     var taskOpts = '<option value="">Set task…</option>' + taskOptions('__none__').replace(/ selected/g, '');
-    if (!count) {
-      return '<div class="ob-bulk-idle">' +
-        '<span>Επίλεξε γραμμές για μαζικές ενέργειες.</span>' +
-        '<button class="ob-btn ob-sm" data-ob-action="select-all-results"' + (!actionable.length || allFilteredSelected ? ' disabled' : '') + '>Select all ' + actionable.length + ' actionable</button>' +
-        '</div>';
-    }
     return '<div class="ob-bulk active">' +
       '<b>' + count + ' selected</b>' +
-      '<button class="ob-btn ob-sm" data-ob-action="select-all-results"' + (!actionable.length || allFilteredSelected ? ' disabled' : '') + '>Select all ' + actionable.length + ' actionable</button>' +
-      '<select class="ob-select" data-ob-action="bulk-cleaner">' + options + '</select>' +
-      '<select class="ob-select" data-ob-action="bulk-task">' + taskOpts + '</select>' +
-      '<button class="ob-btn ob-sm ob-success" data-ob-action="bulk-done">✓ Mark clean</button>' +
-      '<button class="ob-btn ob-sm" data-ob-action="bulk-open">Reopen</button>' +
+      '<button class="ob-btn" data-ob-action="select-all-results"' + (!actionable.length || allFilteredSelected ? ' disabled' : '') + '>Select all ' + actionable.length + ' actionable</button>' +
+      '<select class="ob-select" data-ob-action="bulk-cleaner" aria-label="Assign cleaner to selected rows">' + options + '</select>' +
+      '<select class="ob-select" data-ob-action="bulk-task" aria-label="Set task on selected rows">' + taskOpts + '</select>' +
+      '<button class="ob-btn" data-ob-action="bulk-done">Mark clean</button>' +
+      '<button class="ob-btn" data-ob-action="bulk-open">Reopen</button>' +
       '<span class="ob-spacer"></span>' +
-      '<button class="ob-btn ob-sm" data-ob-action="clear-selection">Clear</button>' +
+      '<button class="ob-btn ob-quiet" data-ob-action="clear-selection">Clear selection</button>' +
       '</div>';
   }
 
-  function pagerHtml(page, pageCount, total, size) {
+  function footHtml(page, pageCount, total, shown) {
     var all = !Number(state.pageSize);
-    return '<div class="ob-pager"><span>' + total + ' matching rows' + (all ? '' : (' · page size ' + size)) + '</span><span class="ob-spacer"></span>' +
-      '<button class="ob-btn ob-square" data-ob-action="page" data-ob-page="' + (page - 1) + '"' + (page <= 1 || all ? ' disabled' : '') + ' aria-label="Προηγούμενη σελίδα">←</button>' +
-      '<b>' + (all ? 'Showing all' : ('Page ' + page + ' / ' + pageCount)) + '</b>' +
-      '<button class="ob-btn ob-square" data-ob-action="page" data-ob-page="' + (page + 1) + '"' + (page >= pageCount || all ? ' disabled' : '') + ' aria-label="Επόμενη σελίδα">→</button>' +
+    var sizes = [[0, 'Fit all rows'], [25, '25 per page'], [50, '50 per page'], [100, '100 per page']];
+    return '<div class="ob-listfoot">' +
+      '<div class="ob-pager">' +
+        '<button class="ob-step" data-ob-action="page" data-ob-page="' + (page - 1) + '"' + (page <= 1 || all ? ' disabled' : '') + ' aria-label="Previous page">‹</button>' +
+        '<b>' + (all ? 'Showing all' : ('Page ' + page + ' / ' + pageCount)) + '</b>' +
+        '<button class="ob-step" data-ob-action="page" data-ob-page="' + (page + 1) + '"' + (page >= pageCount || all ? ' disabled' : '') + ' aria-label="Next page">›</button>' +
+      '</div>' +
       '<select class="ob-select" data-ob-action="page-size" aria-label="Rows shown in the table">' +
-      '<option value="0"' + (all ? ' selected' : '') + '>Fit all rows</option>' +
-      '<option value="25"' + (state.pageSize === 25 ? ' selected' : '') + '>25 rows</option>' +
-      '<option value="50"' + (state.pageSize === 50 ? ' selected' : '') + '>50 rows</option>' +
-      '<option value="100"' + (state.pageSize === 100 ? ' selected' : '') + '>100 rows</option>' +
-      '</select></div>';
+        sizes.map(function (s) {
+          return '<option value="' + s[0] + '"' + (Number(state.pageSize) === s[0] ? ' selected' : '') + '>' + esc(s[1]) + '</option>';
+        }).join('') +
+      '</select>' +
+      '<span class="ob-showing">' + (all ? ('Showing all ' + total) : ('Showing ' + shown + ' of ' + total)) + ' matching rows</span>' +
+      legendHtml() +
+      '</div>';
   }
 
-  function colorLegendHtml() {
-    return '<div class="ob-tone-legend" aria-label="Reservation color coding">' +
-      '<span class="ob-tone-lg"><i class="tone-hot"></i>Priority / late / sofa</span>' +
-      '<span class="ob-tone-lg"><i class="tone-warn"></i>Unassigned / CI unknown</span>' +
-      '<span class="ob-tone-lg"><i class="tone-same"></i>Same-day / Early</span>' +
-      '<span class="ob-tone-lg"><i class="tone-open"></i>Normal open</span>' +
-      '<span class="ob-tone-lg"><i class="tone-done"></i>Clean ✓ done</span>' +
-      '<span class="ob-spacer"></span>' +
-      '<span class="ob-tone-lg">Σήματα: ⏰ Late checkout · ❗ Priority · 👶 Παρκοκρεβάτο · ☀️ Early check-in</span>' +
+  // The dots repeat the row status colours; the second line is the key to the
+  // flag vocabulary the ⋯ menu writes into the notes column.
+  function legendHtml() {
+    return '<div class="ob-tone-legend" aria-label="Board colour key">' +
+      '<span class="ob-tone-lg"><i class="tone-hot"></i>Blocking</span>' +
+      '<span class="ob-tone-lg"><i class="tone-warn"></i>Unassigned / check-in unknown</span>' +
+      '<span class="ob-tone-lg"><i class="tone-done"></i>Done</span>' +
+      '<span class="ob-tone-lg"><i class="tone-open"></i>Neutral — nothing to flag</span>' +
+      '<span class="ob-tone-lg">Flags: ⏰ Late checkout · ❗ Priority · 👶 Park bed · ☀️ Early check-in</span>' +
       '</div>';
   }
 
@@ -726,6 +783,18 @@
     return '<datalist id="ops-beta-cleaners">' + names.sort().map(function (name) { return '<option value="' + esc(name) + '"></option>'; }).join('') + '</datalist>';
   }
 
+  function driverDatalist() {
+    var names = [];
+    if (Array.isArray(S.drivers)) {
+      S.drivers.forEach(function (entry) {
+        var name = typeof entry === 'string' ? entry : (entry && entry.name);
+        if (name && names.indexOf(name) < 0) names.push(name);
+      });
+    }
+    return '<datalist id="ops-beta-drivers">' + names.map(function (name) { return '<option value="' + esc(name) + '"></option>'; }).join('') + '</datalist>';
+  }
+
+  // ── summary cards ────────────────────────────────────────────────────────
   function activeTasks() {
     if (!S.daily || !Array.isArray(S.daily.tasks)) return [];
     return S.daily.tasks.filter(function (task) {
@@ -739,39 +808,106 @@
     var list = (S.apts || []).slice().sort(function (a, b) {
       return String(a.name || '').localeCompare(String(b.name || ''), 'el');
     });
-    return '<option value="">Χωρίς ακίνητο</option>' + list.map(function (apt) {
+    return '<option value="">No property</option>' + list.map(function (apt) {
       return '<option value="' + esc(apt.id) + '"' + (String(current || '') === String(apt.id) ? ' selected' : '') + '>' + esc(apt.name) + '</option>';
     }).join('');
   }
 
-  function tasksHtml(tasks) {
-    var html = '<div class="ob-tasks">';
-    if (!tasks.length) html += '<span style="font-size:11px;color:var(--ob-muted)">No tasks for this day</span>';
-    tasks.forEach(function (task) {
-      var apt = task.aptName || '';
-      if (!apt && task.aptId) {
-        var hit = (S.apts || []).find(function (a) { return a.id === task.aptId; });
-        apt = hit ? hit.name : '';
-      }
-      html += '<label class="ob-task' + (task.completed ? ' ob-task-done' : '') + '"><input type="checkbox" data-ob-action="task-toggle" data-ob-id="' + esc(task.id) + '"' + (task.completed ? ' checked' : '') + '>' +
-        '<span>' + (apt ? '<b>' + esc(apt) + ':</b> ' : '') + esc(task.text) + '</span>' +
-        '<button type="button" data-ob-action="task-delete" data-ob-id="' + esc(task.id) + '" aria-label="Διαγραφή">×</button></label>';
-    });
-    html += '<span class="ob-spacer"></span>';
-    if (!state.composer) html += '<button class="ob-btn ob-sm" data-ob-action="task-open">+ Add task</button>';
-    html += '</div>';
-    if (state.composer) {
-      html += '<div class="ob-composer">' +
-        '<input class="ob-input" data-ob-action="task-text" data-ob-focus="task-text" value="' + esc(state.draftText) + '" placeholder="Νέα εργασία για ' + esc(dateLabel(_opsDate)) + '…">' +
-        '<select class="ob-select" data-ob-action="task-apt">' + aptOptionsHtml(state.draftApt) + '</select>' +
-        '<button class="ob-btn ob-sm ob-primary" data-ob-action="task-save">Προσθήκη</button>' +
-        '<button class="ob-btn ob-sm" data-ob-action="task-cancel">Άκυρο</button>' +
-        '</div>';
+  function taskRowHtml(task) {
+    var apt = task.aptName || '';
+    if (!apt && task.aptId) {
+      var hit = (S.apts || []).find(function (a) { return a.id === task.aptId; });
+      apt = hit ? hit.name : '';
     }
-    return html;
+    return '<div class="ob-task' + (task.completed ? ' ob-task-done' : '') + '">' +
+      '<button type="button" class="ob-rcheck' + (task.completed ? ' ob-on' : '') + '" data-ob-action="task-toggle" data-ob-id="' + esc(task.id) + '" aria-pressed="' + (task.completed ? 'true' : 'false') + '" aria-label="Toggle task">✓</button>' +
+      '<span class="ob-tx">' + esc(task.text) + '</span>' +
+      (apt ? '<span class="ob-tapt">' + esc(apt) + '</span>' : '') +
+      '<button type="button" class="ob-xdel" data-ob-action="task-delete" data-ob-id="' + esc(task.id) + '" aria-label="Delete task">×</button>' +
+      '</div>';
   }
 
-  // ── staff / routes ───────────────────────────────────────────────────────
+  function composerHtml() {
+    if (!state.composer) return '';
+    return '<div class="ob-composer">' +
+      '<input class="ob-input" data-ob-action="task-text" data-ob-focus="task-text" value="' + esc(state.draftText) + '" placeholder="New task for ' + esc(dateLabel(_opsDate)) + '…" aria-label="New task">' +
+      '<select class="ob-select" data-ob-action="task-apt" aria-label="Property">' + aptOptionsHtml(state.draftApt) + '</select>' +
+      '<button class="ob-btn ob-primary" data-ob-action="task-save">Add</button>' +
+      '<button class="ob-btn ob-quiet" data-ob-action="task-cancel">Cancel</button>' +
+      '</div>';
+  }
+
+  function ringHtml(pct) {
+    var r = 27;
+    var circ = 2 * Math.PI * r;
+    var off = circ * (1 - (pct / 100));
+    return '<svg class="ob-ring" viewBox="0 0 64 64" aria-hidden="true">' +
+      '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="#efece6" stroke-width="4"></circle>' +
+      '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="#16283a" stroke-width="4" stroke-linecap="round" ' +
+        'stroke-dasharray="' + circ.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '" transform="rotate(-90 32 32)"></circle>' +
+      '</svg>';
+  }
+
+  function cardsHtml(cleanDay, pct, summary, tasks) {
+    var openTasks = tasks.filter(function (t) { return !t.completed; }).length;
+    return '<section class="ob-cards">' +
+      '<div class="ob-card ob-card-tasks">' +
+        '<div class="ob-tasks-in">' +
+          '<div class="ob-tasks-num">' +
+            '<span class="ob-card-label">Open tasks</span>' +
+            '<span class="ob-bignum">' + openTasks + '</span>' +
+            (state.composer ? '' : '<button type="button" class="ob-addtask" data-ob-action="task-open">＋ Add task</button>') +
+          '</div>' +
+          '<div class="ob-tasks-body"><div class="ob-tasklist">' +
+            (tasks.length ? tasks.map(taskRowHtml).join('') : '<div class="ob-card-foot">No tasks for this day</div>') +
+          '</div></div>' +
+        '</div>' +
+        composerHtml() +
+      '</div>' +
+      '<div class="ob-card ob-card-prog">' +
+        '<div class="ob-card-label">Cleaning progress</div>' +
+        '<div class="ob-ringwrap">' + ringHtml(pct) +
+          '<div><div class="ob-ring-num">' + cleanDay.done + ' / ' + cleanDay.total + '</div><div class="ob-ring-sub">' + pct + '% cleaned</div></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="ob-card">' +
+        '<div class="ob-card-label">Unassigned</div>' +
+        '<div class="ob-bignum">' + summary.unassigned + '</div>' +
+        '<div class="ob-card-foot"><i style="background:#c08a2c"></i>need a cleaner</div>' +
+      '</div>' +
+      '<div class="ob-card ob-card-arrivals">' +
+        '<div class="ob-card-label">Arrivals</div>' +
+        '<div class="ob-bignum">' + summary.arrivals + '</div>' +
+        '<div class="ob-card-foot"><i style="background:#16283a"></i>check-ins today</div>' +
+      '</div>' +
+      '</section>' +
+      '<div class="ob-progstrip"><span>Cleaning progress</span><span class="ob-striptrack"><i style="width:' + pct + '%"></i></span>' +
+      '<span>' + cleanDay.done + ' / ' + cleanDay.total + '</span></div>';
+  }
+
+  // ── side panel ───────────────────────────────────────────────────────────
+  function sectionHtml(key, title, body) {
+    var open = !!state.open[key];
+    return '<div class="ob-sec">' +
+      '<button type="button" class="ob-sechead' + (open ? ' ob-open' : '') + '" data-ob-action="section" data-ob-panel="' + esc(key) + '" aria-expanded="' + (open ? 'true' : 'false') + '">' +
+      esc(title) + '<span class="ob-arw">▾</span></button>' +
+      (open ? '<div class="ob-secbody">' + body + '</div>' : '') +
+      '</div>';
+  }
+
+  function cleanersBody(load) {
+    var roster = cleanerRoster();
+    var list = roster.length
+      ? roster.map(function (name) {
+        var n = load[name] || 0;
+        return '<div class="ob-prow"><span class="ob-pname">' + esc(name) + '</span>' +
+          '<span class="ob-pload">' + n + ' today</span></div>';
+      }).join('')
+      : '<div class="ob-empty-line">No cleaners on the roster yet.</div>';
+    return list + '<div class="ob-addrow"><span class="ob-spacer"></span>' +
+      '<button type="button" class="ob-addlink" data-ob-action="manage-cleaners">＋ Manage cleaners</button></div>';
+  }
+
   function personNamesFor(block, current) {
     var list = [];
     if (typeof _opsAvailableCleaners === 'function') list = _opsAvailableCleaners(current || '', block) || [];
@@ -784,23 +920,37 @@
     var options = '<option value="">—</option>' + personNamesFor(block, current).map(function (name) {
       return '<option value="' + esc(name) + '"' + (String(name).toLowerCase() === String(current || '').toLowerCase() ? ' selected' : '') + '>' + esc(name) + '</option>';
     }).join('');
-    return '<select class="ob-select" data-ob-action="staff" data-ob-block="' + esc(block) + '" data-ob-index="' + index + '">' + options + '</select>';
+    return '<select class="ob-select" data-ob-action="staff" data-ob-block="' + esc(block) + '" data-ob-index="' + index + '" aria-label="Person">' + options + '</select>';
   }
 
-  function staffCard(title, block, baseRows, extra, leave) {
+  function staffBlockHtml(title, block, baseRows, extra, leave) {
     var rowExtra = Number((extra._rows || {})[block] || 0);
     var count = baseRows + rowExtra;
     var values = extra[block] || {};
-    var html = '<div class="ob-staff-card"><h4>' + esc(title) + '</h4>';
+    var html = '<div class="ob-subhead">' + esc(title) + '</div>';
     for (var i = 0; i < count; i++) {
       html += '<div class="ob-staff-row">' + personSelect(block, i, String(values[i] || ''));
       if (leave) {
         var days = Number(((extra.adeiesDur || {})[i]) || 1);
-        html += '<input class="ob-input" style="width:52px;flex:0 0 52px" type="number" min="1" max="30" value="' + days + '" data-ob-action="leave-days" data-ob-index="' + i + '" data-ob-focus="leave:' + i + '" aria-label="Ημέρες άδειας">';
+        html += '<input class="ob-input ob-days" type="number" min="1" max="30" value="' + days + '" data-ob-action="leave-days" data-ob-index="' + i + '" data-ob-focus="leave:' + i + '" aria-label="Days of leave">';
       }
       html += '</div>';
     }
-    return html + '<button class="ob-btn ob-staff-add" data-ob-action="staff-add" data-ob-block="' + esc(block) + '">+ row</button></div>';
+    return html + '<div class="ob-addrow"><span class="ob-spacer"></span>' +
+      '<button type="button" class="ob-addlink" data-ob-action="staff-add" data-ob-block="' + esc(block) + '">＋ Add</button></div>';
+  }
+
+  function staffBody() {
+    if (typeof _opsSyncUnassignedToRepo === 'function') {
+      try { _opsSyncUnassignedToRepo(); } catch (e) {}
+    }
+    _opsEnsure();
+    var extra = (S.daily.extra && S.daily.extra[_opsDate]) || {};
+    return staffBlockHtml('On call', 'oncall', 1, extra, false) +
+      staffBlockHtml('Day off', 'repo', 5, extra, false) +
+      staffBlockHtml('Leave', 'adeies', 5, extra, true) +
+      staffBlockHtml('Linen · Cholargos', 'imatismos_cholargos', 1, extra, false) +
+      staffBlockHtml('Linen · Thessaloniki', 'imatismos_thess', 1, extra, false);
   }
 
   function routeStops(index) {
@@ -811,52 +961,63 @@
     return day.odigoiRoutes[index];
   }
 
-  function driversHtml(extra) {
+  function routesBody() {
+    _opsEnsure();
+    var extra = (S.daily.extra && S.daily.extra[_opsDate]) || {};
     var count = 2 + Number((extra._rows || {}).odigoi || 0);
     var values = extra.odigoi || {};
     var aptOptions = (typeof _opsScheduleAptOptions === 'function') ? _opsScheduleAptOptions() : [];
-    var html = '<div class="ob-staff-card ob-wide"><h4>ΟΔΗΓΟΙ / ΔΙΑΔΡΟΜΕΣ</h4><div class="ob-drivers-grid">';
+    var html = '';
     for (var i = 0; i < count; i++) {
       var stops = routeStops(i);
-      html += '<div class="ob-driver"><div class="ob-staff-row"><input class="ob-input" list="ops-beta-drivers" value="' + esc(values[i] || '') + '" data-ob-action="staff" data-ob-block="odigoi" data-ob-index="' + i + '" data-ob-focus="driver:' + i + '" placeholder="οδηγός"></div>' +
-        '<div class="ob-route-chips">' + stops.map(function (stop, stopIndex) {
-          return '<span class="ob-route-chip">' + esc(stop.name || stop.key) + '<button type="button" data-ob-action="route-remove" data-ob-driver="' + i + '" data-ob-stop="' + stopIndex + '">×</button></span>';
-        }).join('') + '</div>' +
-        '<select class="ob-select" style="width:100%" data-ob-action="route-add" data-ob-driver="' + i + '"><option value="">+ apartment stop…</option>' +
+      html += '<div class="ob-driver">' +
+        '<div class="ob-staff-row"><input class="ob-input" list="ops-beta-drivers" value="' + esc(values[i] || '') + '" data-ob-action="staff" data-ob-block="odigoi" data-ob-index="' + i + '" data-ob-focus="driver:' + i + '" placeholder="Driver" aria-label="Driver"></div>' +
+        '<div class="ob-stops">' + (stops.length ? stops.map(function (stop, stopIndex) {
+          return '<span class="ob-stop">' + esc(stop.name || stop.key) +
+            '<button type="button" data-ob-action="route-remove" data-ob-driver="' + i + '" data-ob-stop="' + stopIndex + '" aria-label="Remove stop">×</button></span>';
+        }).join('') : '<span class="ob-empty-line">No stops yet</span>') + '</div>' +
+        '<select class="ob-select" style="width:100%" data-ob-action="route-add" data-ob-driver="' + i + '" aria-label="Add stop"><option value="">＋ Add apartment stop…</option>' +
         aptOptions.map(function (opt) {
           var used = stops.some(function (stop) { return stop.key === opt.key; });
           return '<option value="' + esc(opt.key) + '"' + (used ? ' disabled' : '') + '>' + esc(opt.title || opt.name) + '</option>';
-        }).join('') + '</select></div>';
+        }).join('') + '</select>' +
+        '</div>';
     }
-    return html + '</div><button class="ob-btn ob-staff-add" data-ob-action="staff-add" data-ob-block="odigoi">+ driver</button></div>';
+    return html + '<div class="ob-addrow"><span class="ob-spacer"></span>' +
+      '<button type="button" class="ob-addlink" data-ob-action="staff-add" data-ob-block="odigoi">＋ Add driver</button></div>';
   }
 
-  function driverDatalist() {
-    var names = [];
-    if (Array.isArray(S.drivers)) {
-      S.drivers.forEach(function (entry) {
-        var name = typeof entry === 'string' ? entry : (entry && entry.name);
-        if (name && names.indexOf(name) < 0) names.push(name);
-      });
-    }
-    return '<datalist id="ops-beta-drivers">' + names.map(function (name) { return '<option value="' + esc(name) + '"></option>'; }).join('') + '</datalist>';
+  function notesBody() {
+    return '<textarea class="ob-notes" data-ob-action="notes" data-ob-focus="daily-notes" placeholder="Notes for the day…" aria-label="Daily notes">' + esc(_opsNotes) + '</textarea>';
   }
 
-  function staffHtml() {
-    if (typeof _opsSyncUnassignedToRepo === 'function') {
-      try { _opsSyncUnassignedToRepo(); } catch (e) {}
-    }
-    _opsEnsure();
-    var extra = S.daily.extra[_opsDate] || {};
-    return '<div class="ob-staff-grid">' +
-      staffCard('ΕΦΗΜΕΡΙΑ', 'oncall', 1, extra, false) +
-      staffCard('ΡΕΠΟ', 'repo', 5, extra, false) +
-      staffCard('ΑΔΕΙΕΣ', 'adeies', 5, extra, true) +
-      '<div class="ob-staff-card"><h4>ΙΜΑΤΙΣΜΟΣ</h4><div class="ob-label">Χολαργός</div><div class="ob-staff-row">' + personSelect('imatismos_cholargos', 0, String(((extra.imatismos_cholargos || {})[0]) || '')) + '</div>' +
-      '<div class="ob-label" style="margin-top:8px">Θεσσαλονίκη</div><div class="ob-staff-row">' + personSelect('imatismos_thess', 0, String(((extra.imatismos_thess || {})[0]) || '')) + '</div></div>' +
-      driversHtml(extra) + '</div>' + driverDatalist();
+  function schedBody() {
+    return '<label class="ob-filebtn">☁ Upload cleaning schedule photo' +
+      '<input type="file" accept="image/*" data-ob-action="schedule-file" id="ops-beta-schedule-file"></label>' +
+      '<div class="ob-schedcheck" id="ops-schedcheck"></div>';
   }
 
+  function exportBody() {
+    return '<div class="ob-exports">' +
+      '<button type="button" class="ob-exbtn" data-ob-action="ops-image"><i>▦</i>Ops image</button>' +
+      '<button type="button" class="ob-exbtn" data-ob-action="cleaner-image"><i>✦</i>Cleaner image</button>' +
+      '<button type="button" class="ob-exbtn" data-ob-action="copy-list"><i>⎘</i>Copy list (text)</button>' +
+      '<button type="button" class="ob-exbtn ob-danger" data-ob-action="restart">Restart cleans</button>' +
+      '</div>';
+  }
+
+  function panelHtml(load) {
+    return '<aside class="ob-panel' + (state.drawerOpen ? ' ob-open' : '') + '" id="ops-beta-panel">' +
+      sectionHtml('cleaners', 'Cleaners', cleanersBody(load)) +
+      sectionHtml('staff', 'Staff', staffBody()) +
+      sectionHtml('routes', 'Routes', routesBody()) +
+      sectionHtml('notes', 'Notes', notesBody()) +
+      sectionHtml('sched', 'Schedule check', schedBody()) +
+      sectionHtml('exports', 'Export', exportBody()) +
+      '</aside>';
+  }
+
+  // ── staff / routes writes ────────────────────────────────────────────────
   function setStaff(block, index, value) {
     _opsEnsure();
     if (!S.daily.extra[_opsDate]) S.daily.extra[_opsDate] = {};
@@ -926,56 +1087,31 @@
     var unassigned = items.filter(function (item) { return item.target && !cleaners(item.target).length; }).length;
     var decisions = items.filter(itemBlocking).length;
     var unknown = items.filter(itemUnknownCheckin).length;
-    var arrivals = items.filter(function (item) { return isArrivalOnly(item.row); }).length;
+    var arrivals = items.filter(function (item) {
+      var row = item.row || {};
+      return isArrivalOnly(row) || row.checkinSameDay === 'yes';
+    }).length;
     return { open: open, unassigned: unassigned, decisions: decisions, unknown: unknown, arrivals: arrivals };
   }
 
-  // ── render ───────────────────────────────────────────────────────────────
-  var COLSPAN = 10;
+  // ── top bar + rail ───────────────────────────────────────────────────────
+  var COLSPAN = 9;
 
-  function dayBarHtml(cleanDay, pct, summary, tasks, isToday) {
-    var dash = 88;
-    var offset = Math.round(dash - (dash * pct) / 100);
-    var menu = state.barMenu
-      ? '<div class="ob-menu">' +
-          '<h6>Κοινοποίηση</h6>' +
-          menuItemHtml('data-ob-action="ops-image"', '📋', 'Ops image', false) +
-          menuItemHtml('data-ob-action="cleaner-image"', '🧹', 'Cleaner image', false) +
-          menuItemHtml('data-ob-action="copy-list"', '📝', 'Αντιγραφή λίστας (κείμενο)', false) +
-          '<hr>' +
-          '<h6>Πρόγραμμα</h6>' +
-          menuItemHtml('data-ob-action="schedule-check"', '📸', 'Check schedule', false) +
-          menuItemHtml('data-ob-action="manage-cleaners"', '🧑‍🤝‍🧑', 'Καθαρίστριες', false) +
-          '<hr>' +
-          menuItemHtml('data-ob-action="restart"', '↺', 'Restart ✓ (μηδενισμός)', false, 'ob-danger') +
-        '</div>'
-      : '';
-    return '<div class="ob-command">' +
-      '<div class="ob-title"><span class="ob-title-mark">OPS</span><b>Daily Ops</b></div>' +
-      '<div class="ob-datenav">' +
-        '<button class="ob-btn ob-square" data-ob-action="nav" data-ob-days="-1" aria-label="Προηγούμενη ημέρα">←</button>' +
-        '<button class="ob-btn' + (isToday ? ' ob-primary' : '') + '" data-ob-action="today">Today</button>' +
-        '<button class="ob-btn ob-square" data-ob-action="nav" data-ob-days="1" aria-label="Επόμενη ημέρα">→</button>' +
-      '</div>' +
-      '<input class="ob-input ob-date" type="date" value="' + esc(_opsDate) + '" data-ob-action="date" data-ob-focus="date">' +
-      '<div class="ob-ring" aria-label="' + pct + '% καθαρισμένα">' +
-        '<svg width="34" height="34"><circle cx="17" cy="17" r="14" fill="none" stroke="#e8ecf1" stroke-width="4"></circle>' +
-        '<circle cx="17" cy="17" r="14" fill="none" stroke="#15764c" stroke-width="4" stroke-linecap="round" stroke-dasharray="' + dash + '" stroke-dashoffset="' + offset + '"></circle></svg>' +
-        '<b>' + pct + '%</b></div>' +
-      '<div class="ob-kpis">' +
-        '<div class="ob-kpi"><b>' + cleanDay.done + '/' + cleanDay.total + '</b><span>Clean</span></div>' +
-        '<div class="ob-kpi' + (summary.unassigned ? ' ob-alert' : '') + '"><b>' + summary.unassigned + '</b><span>Unassigned</span></div>' +
-        '<div class="ob-kpi"><b>' + summary.arrivals + '</b><span>Arrivals</span></div>' +
-        '<div class="ob-kpi ob-hide-sm"><b>' + tasks.filter(function (t) { return !t.completed; }).length + '</b><span>Tasks</span></div>' +
+  function commandBarHtml(isToday) {
+    return '<header class="ob-command">' +
+      '<span class="ob-brand">Elysian</span>' +
+      '<h1 class="ob-screen-title">Daily Ops</h1>' +
+      '<div class="ob-datebar">' +
+        '<button type="button" class="ob-step" data-ob-action="nav" data-ob-days="-1" aria-label="Previous day">‹</button>' +
+        '<button type="button" class="ob-pill' + (isToday ? ' ob-on' : '') + '" data-ob-action="today">Today</button>' +
+        '<button type="button" class="ob-step" data-ob-action="nav" data-ob-days="1" aria-label="Next day">›</button>' +
+        '<input class="ob-input ob-dateinput" type="date" value="' + esc(_opsDate) + '" data-ob-action="date" data-ob-focus="date" aria-label="Date">' +
+        '<span class="ob-datelabel">' + esc(dateLabel(_opsDate)) + '</span>' +
       '</div>' +
       '<span class="ob-spacer"></span>' +
-      '<span class="ob-save-state"><i></i><span id="ops-beta-save-state">Auto-save on</span></span>' +
-      '<button class="ob-btn ob-hide-sm" data-ob-action="manage-cleaners">Καθαρίστριες</button>' +
-      '<div class="ob-menu-host">' +
-        '<button class="ob-btn ob-primary" data-ob-action="bar-menu">Κοινοποίηση ▾</button>' + menu +
-      '</div>' +
-      '<input type="file" id="ops-beta-schedule-file" accept="image/*" data-ob-action="schedule-file" hidden>' +
-      '</div>';
+      '<span class="ob-savestate"><i></i><span id="ops-beta-save-state">Auto-save on</span></span>' +
+      '<button type="button" class="ob-pill ob-ghost ob-toppanel" data-ob-action="toggle-panel">▤ Panel</button>' +
+      '</header>';
   }
 
   function railHtml(allItems, summary, cleanDay) {
@@ -988,31 +1124,35 @@
       ['done', 'Done', cleanDay.done, 'ob-d-ok'],
     ];
     var filters = segs.map(function (seg) {
-      // The pill already reads "Label N" on screen, so a title= would only
+      // The chip already reads "Label N" on screen, so a title= would only
       // duplicate it as a native tooltip. aria-label carries the same string
       // for assistive tech (and for the tests) without the hover popup.
       var plain = seg[1] + ' ' + seg[2];
-      return '<button class="ob-filter' + (state.filter === seg[0] ? ' on' : '') + (seg[0] === 'attention' ? ' ob-blocking' : '') +
+      return '<button type="button" class="ob-filter' + (state.filter === seg[0] ? ' on' : '') +
         '" data-ob-action="filter" data-ob-filter="' + seg[0] + '" aria-label="' + esc(plain) + '">' +
         (seg[3] ? '<i class="' + seg[3] + '"></i>' : '') + esc(seg[1]) + ' <em>' + seg[2] + '</em></button>';
     }).join('');
-    return '<div class="ob-rail"><div class="ob-segs">' + filters + '</div>' +
+    return '<div class="ob-rail">' +
+      '<div class="ob-segs" id="ops-beta-segs">' + filters + '</div>' +
       '<div class="ob-railtools">' +
-        '<input class="ob-input ob-search" value="' + esc(state.search) + '" data-ob-action="search" data-ob-focus="search" placeholder="Search apartment, cleaner or comment…" aria-label="Search apartment, cleaner or comment">' +
-        '<select class="ob-select" data-ob-action="group" aria-label="Ομαδοποίηση">' +
-          '<option value="area"' + (state.group === 'area' ? ' selected' : '') + '>Group: area</option>' +
-          '<option value="cleaner"' + (state.group === 'cleaner' ? ' selected' : '') + '>Group: cleaner</option>' +
-          '<option value="none"' + (state.group === 'none' ? ' selected' : '') + '>Group: none</option>' +
-        '</select>' +
-        '<select class="ob-select" data-ob-action="sort">' +
-          '<option value="status"' + (state.sort === 'status' ? ' selected' : '') + '>Sort: status</option>' +
-          '<option value="cleaner"' + (state.sort === 'cleaner' ? ' selected' : '') + '>Sort: cleaner / route</option>' +
-          '<option value="default"' + (state.sort === 'default' ? ' selected' : '') + '>Sort: default (ungrouped)</option>' +
-        '</select>' +
+        '<input class="ob-input ob-search" type="search" value="' + esc(state.search) + '" data-ob-action="search" data-ob-focus="search" placeholder="Search property, cleaner, note…" aria-label="Search property, cleaner or note">' +
+        '<span class="ob-field"><label for="ops-beta-group">Group</label>' +
+          '<select class="ob-select" id="ops-beta-group" data-ob-action="group">' +
+            '<option value="area"' + (state.group === 'area' ? ' selected' : '') + '>Area</option>' +
+            '<option value="cleaner"' + (state.group === 'cleaner' ? ' selected' : '') + '>Cleaner</option>' +
+            '<option value="none"' + (state.group === 'none' ? ' selected' : '') + '>None</option>' +
+          '</select></span>' +
+        '<span class="ob-field"><label for="ops-beta-sort">Sort</label>' +
+          '<select class="ob-select" id="ops-beta-sort" data-ob-action="sort">' +
+            '<option value="status"' + (state.sort === 'status' ? ' selected' : '') + '>Status</option>' +
+            '<option value="cleaner"' + (state.sort === 'cleaner' ? ' selected' : '') + '>Cleaner / route</option>' +
+            '<option value="default"' + (state.sort === 'default' ? ' selected' : '') + '>Default (ungrouped)</option>' +
+          '</select></span>' +
       '</div>' +
       '</div>';
   }
 
+  // ── render ───────────────────────────────────────────────────────────────
   function paint() {
     var root = document.getElementById('tab-ops');
     if (!root) return;
@@ -1058,6 +1198,7 @@
     var pageItems = visibleItems.slice(pageStart, pageStart + size);
     var actionableOnPage = pageItems.filter(function (item) { return !!item.target; });
     var pageAllSelected = actionableOnPage.length > 0 && actionableOnPage.every(function (item) { return !!state.selected[itemId(item)]; });
+    var actionableVisible = visibleItems.filter(function (item) { return !!item.target; }).length;
     var summary = statusSummary(allItems);
     var load = workloadMap(allItems);
     var tasks = activeTasks();
@@ -1075,38 +1216,45 @@
         });
       });
     } else {
-      body = '<tr><td colspan="' + COLSPAN + '"><div class="ob-empty">No rows match this view.</div></td></tr>';
+      body = '<tr><td colspan="' + COLSPAN + '"><div class="ob-emptystate">No rows match this view. Try another filter or clear the search.</div></td></tr>';
     }
 
     root.innerHTML = '<div class="ob-shell">' +
-      dayBarHtml(cleanDay, pct, summary, tasks, isToday) +
-      railHtml(allItems, summary, cleanDay) +
-      '<div class="ob-page">' + cleanerDatalist() +
-        '<details class="ob-collapsible ob-task-drawer"' + (state.open.tasks || state.composer ? ' open' : '') + '><summary data-ob-action="disclose" data-ob-panel="tasks">Tasks <b>' + tasks.filter(function (t) { return !t.completed; }).length + ' open</b></summary>' + tasksHtml(tasks) + '</details>' +
-        '<div class="ob-schedcheck" id="ops-schedcheck"></div>' +
-        bulkBarHtml(visibleItems, allItems) +
-        '<div id="ops-beta-board-capture">' +
-          '<div class="ob-board-head"><div><h2>DISPATCH CONSOLE · CHECKOUT &amp; CLEANING</h2><small>' + esc(dateLabel(_opsDate)) + ' · showing ' + pageItems.length + ' of ' + visibleItems.length + ' matching rows</small></div><span class="ob-spacer"></span><b>' + cleanDay.done + ' / ' + cleanDay.total + ' clean</b><div class="ob-progress"><span style="width:' + pct + '%"></span></div></div>' +
-          colorLegendHtml() +
-          '<div class="ob-dispatch-layout"><div class="ob-dispatch-main">' +
+      commandBarHtml(isToday) +
+      '<div class="ob-wrap"><div class="ob-layout' + (state.panelOpen ? '' : ' ob-no-panel') + '">' +
+        '<main class="ob-main">' +
+          cleanerDatalist() + driverDatalist() +
+          cardsHtml(cleanDay, pct, summary, tasks) +
+          railHtml(allItems, summary, cleanDay) +
+          bulkBarHtml(visibleItems, allItems) +
+          '<div id="ops-beta-board-capture"><div class="ob-list">' +
+            '<div class="ob-list-head">' +
+              '<h2>Dispatch board</h2>' +
+              '<small>' + esc(dateLabel(_opsDate)) + ' · showing ' + pageItems.length + ' of ' + visibleItems.length + ' matching rows</small>' +
+              '<span class="ob-spacer"></span>' +
+              '<button class="ob-btn ob-quiet ob-selectall" data-ob-action="select-all-results"' + (actionableVisible ? '' : ' disabled') + '>Select all ' + actionableVisible + '</button>' +
+              '<span class="ob-clean-count">' + cleanDay.done + ' / ' + cleanDay.total + ' clean</span>' +
+              '<div class="ob-progress"><span style="width:' + pct + '%"></span></div>' +
+            '</div>' +
             '<div class="ob-table-wrap"><table class="ob-dispatch-table"><thead><tr>' +
               '<th class="ob-c-sel ob-center"><input type="checkbox" class="ob-sel-check" data-ob-action="select-page"' + (pageAllSelected ? ' checked' : '') + ' aria-label="Select this page"></th>' +
-              '<th class="ob-c-tick ob-center">✓</th>' +
+              '<th class="ob-c-tick ob-center">Clean</th>' +
               '<th class="ob-c-prop">Property</th>' +
-              '<th class="ob-c-stay">Stay / check-in</th>' +
-              '<th class="ob-c-sig">Signals</th>' +
+              '<th class="ob-c-stay">Stay</th>' +
               '<th class="ob-c-crew">Cleaner</th>' +
               '<th class="ob-c-task">Task</th>' +
               '<th class="ob-c-note">Notes</th>' +
               '<th class="ob-c-status">Status</th>' +
               '<th class="ob-c-act"></th>' +
-            '</tr></thead><tbody>' + body + '</tbody></table></div>' + pagerHtml(state.page, pageCount, visibleItems.length, size) +
+            '</tr></thead><tbody>' + body + '</tbody></table></div>' +
           '</div></div>' +
-        '</div>' +
-        '<div class="ob-aux-grid"><details class="ob-collapsible"' + (state.open.staff ? ' open' : '') + '><summary data-ob-action="disclose" data-ob-panel="staff">Staff, leave, linen &amp; driver routes</summary><div class="ob-section"><h3>Same saved data as Daily Ops</h3>' + staffHtml() + '</div></details>' +
-          '<details class="ob-collapsible"' + (state.open.notes ? ' open' : '') + '><summary data-ob-action="disclose" data-ob-panel="notes">Daily notes</summary><div class="ob-section"><textarea class="ob-notes" data-ob-action="notes" data-ob-focus="daily-notes" placeholder="General notes for the day…">' + esc(_opsNotes) + '</textarea></div></details>' +
-        '</div>' +
-      '</div></div>';
+          footHtml(state.page, pageCount, visibleItems.length, pageItems.length) +
+        '</main>' +
+        panelHtml(load) +
+      '</div></div>' +
+      '<div class="ob-backdrop' + (state.drawerOpen ? ' ob-on' : '') + '" data-ob-action="drawer-close"></div>' +
+      '<button type="button" class="ob-fab" data-ob-action="drawer-toggle">▤ Panel</button>' +
+      '</div>';
 
     bind(root);
     // Paste/drag schedule capture + repaint the OCR panel into the mount above.
@@ -1169,7 +1317,6 @@
   function closeOverlays() {
     state.menuFor = '';
     state.assignFor = '';
-    state.barMenu = false;
   }
 
   // ── row mutations ────────────────────────────────────────────────────────
@@ -1259,18 +1406,6 @@
       row.cleanTaskNote = next;
     } else {
       row[field] = value;
-    }
-    queueSave();
-  }
-
-  function updateCleaners(key, value) {
-    var row = findClean(key);
-    if (!row) return;
-    var list = String(value || '').split(/\s*[·,;|/]\s*/).map(function (name) { return name.trim(); }).filter(Boolean);
-    if (typeof _opsWriteCleaners === 'function') _opsWriteCleaners(row, list);
-    else {
-      row.cleanerNames = list;
-      row.cleanerName = list.join(' · ');
     }
     queueSave();
   }
@@ -1395,11 +1530,11 @@
   }
 
   // ── tasks (inline composer — no window.prompt) ───────────────────────────
-  function toggleTask(id, checked) {
+  function toggleTask(id) {
     var task = (S.daily.tasks || []).find(function (item) { return item.id === id; });
     if (!task) return;
-    task.completed = !!checked;
-    task.completedDate = checked ? _opsDate : null;
+    task.completed = !task.completed;
+    task.completedDate = task.completed ? _opsDate : null;
     if (typeof save === 'function') save();
     if (typeof saveToDb === 'function' && typeof _dbAvailable !== 'undefined' && _dbAvailable) saveToDb();
     rerender();
@@ -1560,7 +1695,7 @@
       try {
         canvas = await capture(el, {
           scale: 2,
-          backgroundColor: '#f5f7fa',
+          backgroundColor: '#faf9f7',
           useCORS: true,
           logging: false,
           onclone: function (clonedDoc) { flattenCloneColors(clonedDoc); },
@@ -1587,6 +1722,18 @@
     });
   }
 
+  // The panel is docked on desktop and an overlay drawer below the layout
+  // breakpoint, so the same button has to mean two different things. matchMedia
+  // is absent from the bare test context, hence the guard.
+  function drawerMode() {
+    try {
+      if (typeof window.matchMedia !== 'function') return false;
+      return window.matchMedia('(max-width: 1400px)').matches;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // ── events ───────────────────────────────────────────────────────────────
   function bind(root) {
     if (root.dataset.opsBetaBound === '1') return;
@@ -1595,15 +1742,14 @@
     root.addEventListener('click', function (event) {
       var button = event.target.closest('[data-ob-action]');
       if (!button || !root.contains(button)) {
-        if (state.menuFor || state.assignFor || state.barMenu) { closeOverlays(); rerender(); }
+        if (state.menuFor || state.assignFor) { closeOverlays(); rerender(); }
         return;
       }
       var action = button.dataset.obAction;
-      if (action === 'disclose') {
+      if (action === 'section') {
         event.preventDefault();
         var panel = button.dataset.obPanel;
         state.open[panel] = !state.open[panel];
-        if (panel === 'tasks' && !state.open.tasks) state.composer = false;
         rerender();
         return;
       }
@@ -1614,6 +1760,14 @@
         rerender();
       } else if (action === 'today') {
         persist(false); closeOverlays(); _opsDate = today(); rerender();
+      } else if (action === 'toggle-panel') {
+        if (drawerMode()) state.drawerOpen = !state.drawerOpen;
+        else state.panelOpen = !state.panelOpen;
+        rerender();
+      } else if (action === 'drawer-toggle') {
+        state.drawerOpen = !state.drawerOpen; rerender();
+      } else if (action === 'drawer-close') {
+        state.drawerOpen = false; rerender();
       } else if (action === 'filter') {
         state.filter = button.dataset.obFilter || 'all'; state.page = 1; closeOverlays(); rerender();
       } else if (action === 'page') {
@@ -1626,6 +1780,14 @@
         bulkDone(true);
       } else if (action === 'bulk-open') {
         bulkDone(false);
+      } else if (action === 'clean') {
+        var tickRow = findClean(decoded(button.dataset.obKey));
+        if (tickRow) {
+          tickRow.cleanDone = !tickRow.cleanDone;
+          persist(true);
+          if (typeof _opsMaybeAdvanceAfterCleans === 'function') _opsMaybeAdvanceAfterCleans();
+          rerender();
+        }
       } else if (action === 'flag') {
         toggleFlag(Number(button.dataset.obIndex), button.dataset.obFlag);
       } else if (action === 'checkin') {
@@ -1649,8 +1811,6 @@
         toggleKind(Number(button.dataset.obIndex), button.dataset.obKind);
       } else if (action === 'row-remove') {
         removeRow(Number(button.dataset.obIndex));
-      } else if (action === 'bar-menu') {
-        state.barMenu = !state.barMenu; state.menuFor = ''; state.assignFor = ''; rerender();
       } else if (action === 'manage-cleaners') {
         closeOverlays();
         if (typeof opsManageCleaners === 'function') opsManageCleaners();
@@ -1658,13 +1818,14 @@
       } else if (action === 'copy-list') {
         closeOverlays();
         if (typeof opsCopyCleanList === 'function') opsCopyCleanList();
-        rerender();
       } else if (action === 'task-open') {
-        state.composer = true; state.open.tasks = true; rerender();
+        state.composer = true; rerender();
       } else if (action === 'task-cancel') {
         state.composer = false; state.draftText = ''; state.draftApt = ''; rerender();
       } else if (action === 'task-save') {
         saveTask();
+      } else if (action === 'task-toggle') {
+        event.preventDefault(); toggleTask(button.dataset.obId);
       } else if (action === 'task-delete') {
         event.preventDefault(); deleteTask(button.dataset.obId);
       } else if (action === 'staff-add') {
@@ -1675,16 +1836,9 @@
         closeOverlays();
         restartCleans();
       } else if (action === 'ops-image') {
-        state.barMenu = false;
-        rerender();
         copyBetaImage();
       } else if (action === 'cleaner-image') {
-        state.barMenu = false;
-        rerender();
         if (typeof opsCopyCleaningImage === 'function') opsCopyCleaningImage();
-      } else if (action === 'schedule-check') {
-        state.barMenu = false;
-        var file = document.getElementById('ops-beta-schedule-file'); if (file) file.click();
       }
     });
 
@@ -1714,16 +1868,6 @@
         bulkCleaner(input.value);
       } else if (action === 'bulk-task') {
         bulkTask(input.value);
-      } else if (action === 'clean') {
-        var clean = findClean(decoded(input.dataset.obKey));
-        if (clean) {
-          clean.cleanDone = !!input.checked;
-          persist(true);
-          if (typeof _opsMaybeAdvanceAfterCleans === 'function') _opsMaybeAdvanceAfterCleans();
-          rerender();
-        }
-      } else if (action === 'row-check') {
-        updateRowField(Number(input.dataset.obIndex), input.dataset.obField, !!input.checked); persist(true);
       } else if (action === 'row-field') {
         updateRowField(Number(input.dataset.obIndex), input.dataset.obField, input.value);
         // pax can add/remove a derived sofa or long-stay tag: refresh just those
@@ -1739,8 +1883,6 @@
         input.value = '';
       } else if (action === 'task-apt') {
         state.draftApt = input.value || '';
-      } else if (action === 'task-toggle') {
-        toggleTask(input.dataset.obId, input.checked);
       } else if (action === 'staff') {
         setStaff(input.dataset.obBlock, Number(input.dataset.obIndex), input.value); rerender();
       } else if (action === 'leave-days') {
@@ -1754,6 +1896,11 @@
     });
 
     root.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') {
+        if (state.menuFor || state.assignFor) { closeOverlays(); rerender(); return; }
+        if (state.drawerOpen) { state.drawerOpen = false; rerender(); }
+        return;
+      }
       if (event.key !== 'Enter') return;
       var add = event.target.closest('[data-ob-action="cleaner-add"]');
       if (add && root.contains(add)) {
@@ -1781,6 +1928,9 @@
         state.searchTimer = setTimeout(function () { rerender(); }, 140);
       } else if (action === 'row-field') {
         updateRowField(Number(input.dataset.obIndex), input.dataset.obField, input.value);
+        if (input.dataset.obField === 'arrivalTime' && input.classList) {
+          input.classList.toggle('ob-eta-empty', !input.value);
+        }
       } else if (action === 'comment') {
         updateComment(Number(input.dataset.obIndex), decoded(input.dataset.obKey), input.value);
       } else if (action === 'clean-field' && input.tagName !== 'SELECT') {

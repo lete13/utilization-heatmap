@@ -167,10 +167,12 @@ assert(!/>L</.test(panel.innerHTML) && !/>P</.test(panel.innerHTML), 'letter fla
 assert(panel.innerHTML.includes('tone-hot'), 'ops-urgency hot tone is rendered');
 assert(panel.innerHTML.includes('tone-warn'), 'ops-urgency warn tone is rendered');
 assert(panel.innerHTML.includes('tone-done'), 'ops-urgency done tone is rendered');
-assert(panel.innerHTML.includes('Priority / late / sofa'), 'color legend lists hot tone');
 assert(panel.innerHTML.includes('ob-tone-legend'), 'color legend is on the board');
-assert(panel.innerHTML.includes('Καθαρίστριες'), 'roster manage button present');
-assert(panel.innerHTML.includes('ob-cchip') || panel.innerHTML.includes('Καθαρίστρια'), 'cleaner chips / add field present');
+assert(panel.innerHTML.includes('>Blocking</span>') || /tone-hot"><\/i>Blocking/.test(panel.innerHTML), 'legend names the blocking tone');
+assert(panel.innerHTML.includes('Neutral — nothing to flag'), 'legend names the neutral tone');
+assert(panel.innerHTML.includes('data-ob-action="manage-cleaners"'), 'roster manage control present');
+assert(panel.innerHTML.includes('Manage cleaners'), 'roster manage control is labelled in English');
+assert(panel.innerHTML.includes('ob-cchip') || panel.innerHTML.includes('Add cleaner'), 'cleaner chips / add field present');
 assert(!panel.innerHTML.includes('BETA'), 'Beta badge removed after promote');
 assert(typeof context.renderOps === 'function', 'renderOps overwritten by promoted UI');
 assert.strictEqual(context.renderOps, context.renderOpsBeta, 'renderOps and renderOpsBeta are the same renderer');
@@ -185,10 +187,16 @@ context._opsBetaState.pageSize = 0;
 context.renderOps();
 assert(panel.innerHTML.includes('ob-nchip hot'), 'PRIORITY / Late notes render as red chips');
 assert(panel.innerHTML.includes('ob-nchip cool'), 'sofa / Early notes render as blue chips');
-assert(/ob-nchip hot[^>]*>PRIORITY</.test(panel.innerHTML), 'PRIORITY chip is hot/red');
-assert(/ob-nchip hot[^>]*>Late Checkout: 12:00</.test(panel.innerHTML), 'Late chip is hot/red');
-assert(/ob-nchip cool[^>]*>Prepare 1 sofa bed</.test(panel.innerHTML), 'sofa chip is cool/blue');
-assert(/ob-nchip cool[^>]*>Early check-in</.test(panel.innerHTML), 'Early chip is cool/blue');
+// The tag text sits in its own span so a long tag can ellipsize inside the chip
+// without pushing the remove button out of the notes cell.
+assert(/ob-nchip hot"><span>PRIORITY</.test(panel.innerHTML), 'PRIORITY chip is hot/red');
+assert(/ob-nchip hot"><span>Late Checkout: 12:00</.test(panel.innerHTML), 'Late chip is hot/red');
+assert(/ob-nchip cool"><span>Prepare 1 sofa bed</.test(panel.innerHTML), 'sofa chip is cool/blue');
+assert(/ob-nchip cool"><span>Early check-in</.test(panel.innerHTML), 'Early chip is cool/blue');
+assert(
+  /ob-nchip hot"><span>PRIORITY<\/span><button[^>]*data-ob-flag="priority"/.test(panel.innerHTML),
+  'a flag-backed tag stays removable straight from its chip'
+);
 
 const css = fs.readFileSync(path.join(rootDir, 'fe', 'daily-ops-beta.css'), 'utf8');
 assert(/\.ob-nchip\.hot/.test(css) && /\.ob-nchip\.cool/.test(css), 'note chip color styles present');
@@ -236,7 +244,8 @@ context._opsBetaState.pageSize = 0;
 context._opsBetaState.page = 1;
 context.renderOps();
 assert(panel.innerHTML.includes('Arrival Studio'), 'Open filter keeps arrival-only rows');
-assert(panel.innerHTML.includes('Άφιξη'), 'arrival-only chip rendered under Open');
+assert(panel.innerHTML.includes('>Arrival<'), 'arrival-only rows say so in the details cluster');
+assert(panel.innerHTML.includes('Arrival only'), 'arrival-only rows carry a badge next to the name');
 assert(/Open \d+/.test(panel.innerHTML), 'Open filter badge still present');
 
 context._opsBetaState.filter = 'attention';
@@ -282,7 +291,8 @@ assert(!panel.innerHTML.includes('ob-grp'), 'default sort renders an ungrouped b
 context._opsBetaState.sort = 'status';
 context.renderOps();
 assert(panel.innerHTML.includes('ob-grp'), 'status sort renders grouped sections');
-assert(panel.innerHTML.includes('ακίνητα'), 'group headers summarise their section');
+assert(/<em>\d+ propert(y|ies)<\/em>/.test(panel.innerHTML), 'group headers summarise their section');
+assert(/class="ob-gclean[^"]*">\d+\/\d+ clean</.test(panel.innerHTML), 'group headers anchor an n/N clean pill');
 const groupCount = (panel.innerHTML.match(/class="ob-grp"/g) || []).length;
 assert(groupCount >= 2, 'area grouping produces more than one section');
 assert(
@@ -315,24 +325,49 @@ assert(panel.innerHTML.includes('data-ob-action="assign-pick"'), 'assign popover
 assert(panel.innerHTML.includes('ob-ld'), 'assign popover shows per-cleaner workload');
 listeners.click(event('assign-open', { dataset: { obAction: 'assign-open', obId: rowId } }));
 
-// Contextual bulk bar: idle affordance until something is selected.
+// The bulk bar is contextual: it does not exist at all until rows are selected,
+// so "select all matching rows" has to live somewhere that is always reachable
+// (the list head, which survives the card breakpoint that hides <thead>).
 listeners.click(event('clear-selection'));
-assert(panel.innerHTML.includes('ob-bulk-idle'), 'bulk bar is idle with an empty selection');
+assert(!panel.innerHTML.includes('ob-bulk'), 'no bulk bar while nothing is selected');
+assert(
+  /class="ob-btn ob-quiet ob-selectall" data-ob-action="select-all-results"/.test(panel.innerHTML),
+  'select-all stays reachable without the bulk bar'
+);
 listeners.change(event('select-page', { checked: true }));
-assert(panel.innerHTML.includes('ob-bulk active'), 'bulk bar activates on selection');
+assert(panel.innerHTML.includes('ob-bulk active'), 'bulk bar appears on selection');
+assert(/<b>\d+ selected<\/b>/.test(panel.innerHTML), 'bulk bar leads with the selection count');
 assert(/data-ob-action="select-page"[^>]*checked/.test(panel.innerHTML), 'page checkbox reflects the selection after rerender');
 listeners.click(event('clear-selection'));
-assert(panel.innerHTML.includes('ob-bulk-idle'), 'clearing the selection restores the idle bar');
+assert(!panel.innerHTML.includes('ob-bulk'), 'clearing the selection removes the bulk bar again');
 
-// Restored parity: schedule-check mount, plain-text copy list, no window.prompt.
+// ── side panel ──────────────────────────────────────────────────────────────
+// The exports and the schedule check moved out of a day-bar dropdown into the
+// side panel, so they are visible rather than hidden behind a menu.
+assert(panel.innerHTML.includes('id="ops-beta-panel"'), 'the side panel is rendered');
+['Cleaners', 'Staff', 'Routes', 'Notes', 'Schedule check', 'Export'].forEach((title) => {
+  assert(
+    panel.innerHTML.includes('>' + title + '<span class="ob-arw">'),
+    'side panel keeps the ' + title + ' section'
+  );
+});
 assert(panel.innerHTML.includes('id="ops-schedcheck"'), 'schedule-check OCR panel has a mount point');
-listeners.click(event('bar-menu'));
+assert(panel.innerHTML.includes('data-ob-action="schedule-file"'), 'schedule photo upload is exposed');
 assert(panel.innerHTML.includes('data-ob-action="copy-list"'), 'plain-text copy list is exposed');
 assert(panel.innerHTML.includes('data-ob-action="ops-image"'), 'Ops image export is exposed');
 assert(panel.innerHTML.includes('data-ob-action="cleaner-image"'), 'cleaner image export is exposed');
-assert(panel.innerHTML.includes('data-ob-action="schedule-check"'), 'schedule check upload is exposed');
 assert(panel.innerHTML.includes('data-ob-action="restart"'), 'restart cleans is exposed');
-listeners.click(event('bar-menu'));
+assert(panel.innerHTML.includes('data-ob-action="toggle-panel"'), 'the top bar can hide/show the panel');
+assert(panel.innerHTML.includes('data-ob-action="drawer-toggle"'), 'a floating control opens the panel as a drawer');
+
+// Panel sections are collapsible, and the open/closed state has to survive the
+// full innerHTML swap or every repaint would slam them shut.
+assert(panel.innerHTML.includes('data-ob-action="section"'), 'panel sections are collapsible');
+assert(panel.innerHTML.includes('data-ob-panel="routes"'), 'routes section has a disclosure control');
+assert(!panel.innerHTML.includes('data-ob-action="route-add"'), 'routes start collapsed');
+listeners.click(event('section', { dataset: { obAction: 'section', obPanel: 'routes' } }));
+assert(panel.innerHTML.includes('data-ob-action="route-add"'), 'opening routes reveals its body');
+listeners.click(event('section', { dataset: { obAction: 'section', obPanel: 'routes' } }));
 
 // Inline task composer replaces the old window.prompt() flow.
 listeners.click(event('task-open'));
@@ -373,9 +408,20 @@ assert(/\.ob-rail\s*\{[^}]*position:\s*sticky/.test(css), 'triage rail is sticky
 assert(/\.ob-dispatch-table th\s*\{[^}]*position:\s*sticky/.test(css), 'column header is sticky');
 assert(/--ob-stick/.test(css), 'sticky offsets come from one shared token');
 
-// Responsive: the table collapses into cards below desktop.
-assert(/@media \(max-width: 1180px\)/.test(css), 'card breakpoint defined below desktop');
+// Responsive tiers. #tab-ops only ever gets about (viewport - 264px) because the
+// app shell keeps a fixed 216px nav and #main-content pads 24px a side, so the
+// breakpoints are higher than the tab widths they are chosen for.
+assert(/@media \(max-width: 1400px\)/.test(css), 'panel becomes an overlay drawer below the widest tier');
+assert(
+  /@media \(max-width: 1400px\)[^@]*\.ob-panel\s*\{[^}]*position:\s*fixed/.test(css),
+  'the drawer panel is pulled out of the layout grid'
+);
+assert(/@media \(max-width: 1100px\)/.test(css), 'card breakpoint defined below desktop');
 assert(/grid-template-areas/.test(css), 'rows become cards via grid areas');
+assert(
+  /@media \(max-width: 1100px\)[^@]*\.ob-dispatch-table thead\s*\{[^}]*display:\s*none/.test(css),
+  'column headers stand down once rows are cards'
+);
 
 // ── video-review defects ────────────────────────────────────────────────────
 
@@ -392,7 +438,7 @@ assert(
   'clicking a filter pill pops up nothing'
 );
 assert(
-  /data-ob-action="row-menu"[^>]*aria-label="Ενέργειες γραμμής"/.test(panel.innerHTML),
+  /data-ob-action="row-menu"[^>]*aria-label="Row actions"/.test(panel.innerHTML),
   'row actions button is labelled for assistive tech'
 );
 assert(
@@ -418,7 +464,7 @@ assert(
   'the destructive item uses the same aligned shape as the rest'
 );
 assert(
-  /#tab-ops \.ob-menu button \{[^}]*grid-template-columns:\s*13px 18px 1fr/.test(css),
+  /#tab-ops \.ob-menu button \{[^}]*grid-template-columns:\s*16px 18px 1fr/.test(css),
   'menu gutters are fixed tracks so empty ones still reserve their width'
 );
 assert(
@@ -430,17 +476,18 @@ listeners.click(event('row-menu', { dataset: { obAction: 'row-menu', obId: rowId
 // 3. The triage rail has to survive a phone. It is the sticky element there
 // (the day bar stands down), it grows instead of clipping, and the chips scroll
 // behind a shadow affordance rather than silently ending.
-assert(/@media \(max-width: 540px\)/.test(css), 'a narrow tier exists below the tablet card');
+assert(/@media \(max-width: 520px\)/.test(css), 'a narrow tier exists below the tablet card');
 assert(
-  /@media \(max-width: 900px\)[^@]*\.ob-rail\s*\{[^}]*height:\s*auto/.test(css),
+  /#tab-ops \.ob-rail\s*\{[^}]*min-height:\s*var\(--ob-rail\)/.test(css) &&
+    !/#tab-ops \.ob-rail\s*\{[^}]*[^-]height:\s*\d/.test(css),
   'the rail grows with its content instead of clipping to a fixed height'
 );
 assert(
-  /@media \(max-width: 900px\)[^@]*\.ob-command\s*\{[^}]*position:\s*static/.test(css),
+  /@media \(max-width: 760px\)[^@]*\.ob-command\s*\{[^}]*position:\s*static/.test(css),
   'the day bar stops being sticky on narrow screens'
 );
 assert(
-  /@media \(max-width: 900px\)[^@]*\.ob-rail\s*\{[^}]*top:\s*0/.test(css),
+  /@media \(max-width: 760px\)[^@]*\.ob-rail\s*\{[^}]*top:\s*0/.test(css),
   'the rail takes over as the pinned strip so filters stay reachable'
 );
 assert(/\.ob-segs\s*\{[^}]*overflow-x:\s*auto/.test(css), 'filter chips scroll horizontally');
@@ -448,26 +495,28 @@ assert(
   /\.ob-segs\s*\{[^}]*radial-gradient\(farthest-side at 100% 50%/.test(css),
   'chips carry a scroll-shadow affordance showing there is more to reach'
 );
-assert(
-  !/@media \(max-width: 540px\)[^@]*\.ob-segs\s*\{[^}]*display:\s*none/.test(css),
-  'the rail is never hidden on a phone'
-);
+[760, 520].forEach((tier) => {
+  assert(
+    !new RegExp('@media \\(max-width: ' + tier + 'px\\)[^@]*\\.ob-segs\\s*\\{[^}]*display:\\s*none').test(css),
+    'the rail is never hidden at the ' + tier + 'px tier'
+  );
+});
 
-// 4. Mobile day bar and console header get room to breathe instead of clipping.
+// 4. Mobile day bar and list header get room to breathe instead of clipping.
 assert(
-  /@media \(max-width: 900px\)[^@]*\.ob-command\s*\{[^}]*flex-wrap:\s*wrap/.test(css),
+  /@media \(max-width: 760px\)[^@]*\.ob-command\s*\{[^}]*flex-wrap:\s*wrap/.test(css),
   'the day bar wraps rather than overflowing'
 );
 assert(
-  /@media \(max-width: 900px\)[^@]*\.ob-board-head\s*\{[^}]*flex-direction:\s*column/.test(css),
-  'the dispatch console header stacks on narrow screens'
+  /@media \(max-width: 760px\)[^@]*\.ob-list-head\s*\{[^}]*flex-direction:\s*column/.test(css),
+  'the list header stacks on narrow screens'
 );
 assert(
-  /@media \(max-width: 900px\)[^@]*\.ob-progress\s*\{[^}]*width:\s*100%/.test(css),
+  /@media \(max-width: 760px\)[^@]*\.ob-progress\s*\{[^}]*width:\s*100%/.test(css),
   'the progress bar takes the full width once the header stacks'
 );
 assert(
-  /@media \(max-width: 540px\)[^@]*grid-template-columns:\s*20px 24px minmax\(0, 1fr\) auto/.test(css),
+  /@media \(max-width: 520px\)[^@]*grid-template-columns:\s*20px 22px minmax\(0, 1fr\) 22px/.test(css),
   'the narrow card drops a track so its bands cannot overflow'
 );
 
@@ -520,4 +569,128 @@ assert.strictEqual(rows.length, beforeDecline, 'a declined host removal changes 
 assert.strictEqual(panel.innerHTML, paintedBefore, 'a declined host removal does not repaint');
 delete context.opsRemoveRow;
 
-console.log('daily-ops-beta-scale: ok (dispatch console + no-tooltip controls, aligned menus, phone rail, row removal)');
+// ── v2 design port (fe/daily-ops-v2-prototype.html) ─────────────────────────
+
+context._opsBetaState.filter = 'all';
+context._opsBetaState.sort = 'default';
+context._opsBetaState.group = 'area';
+context._opsBetaState.pageSize = 0;
+context._opsBetaState.page = 1;
+// the bulk-assign runs above left every row staffed; the status column can only
+// be checked for discrimination if at least one row is back to having no crew
+rows[1].cleanerNames = [];
+rows[1].cleanerName = '';
+rows[1].cleanDone = false;
+context.renderOps();
+
+// The slim top bar: wordmark, screen title, prev / Today / next / date input,
+// save-state indicator and the panel toggle, in that order.
+const bar = panel.innerHTML.slice(
+  panel.innerHTML.indexOf('<header class="ob-command">'),
+  panel.innerHTML.indexOf('</header>')
+);
+assert(bar.includes('class="ob-brand">Elysian'), 'top bar carries the wordmark');
+assert(bar.includes('class="ob-screen-title">Daily Ops</h1>'), 'top bar names the screen');
+[
+  ['data-ob-action="nav" data-ob-days="-1"', 'previous day'],
+  ['data-ob-action="today"', 'Today'],
+  ['data-ob-action="nav" data-ob-days="1"', 'next day'],
+  ['data-ob-action="date"', 'date input'],
+].forEach(([needle, what]) => assert(bar.includes(needle), 'top bar keeps the ' + what + ' control'));
+assert(bar.includes('id="ops-beta-save-state"'), 'top bar shows the save state');
+assert(bar.includes('data-ob-action="toggle-panel"'), 'top bar toggles the side panel');
+assert(bar.indexOf('ob-brand') < bar.indexOf('ob-screen-title'), 'wordmark precedes the title');
+assert(bar.indexOf('ob-screen-title') < bar.indexOf('ob-datebar'), 'title precedes the date controls');
+
+// Labels are English throughout. _opsDayLabel would hand back Greek month and
+// weekday names, so the renderer formats the date itself.
+assert(/>Saturday, 15 August 2026</.test(panel.innerHTML), 'the day label is written in English');
+// OPS_TAG_PARK is a stored comment token, not chrome, so it is the one Greek
+// string allowed through — everything else the renderer writes is English.
+assert(!/[\u0386-\u03CE]/.test(panel.innerHTML.replace(/Παρκοκρεβάτο/g, '')), 'no Greek copy leaks into the rendered board');
+assert(/TASK_LABELS/.test(betaJs), 'Greek OPS_CLEAN_TASKS labels are mapped to English for display');
+assert(
+  /taskLabel\(item\[0\], item\[1\]\)/.test(betaJs),
+  'the task option value stays the data-layer key while only the label is translated'
+);
+
+// Tasks-led cards: Open tasks first and largest, then the progress ring,
+// Unassigned and Arrivals.
+const cardOrder = ['ob-card-tasks', 'ob-card-prog', '>Unassigned<', '>Arrivals<']
+  .map((needle) => panel.innerHTML.indexOf(needle));
+assert(cardOrder.every((i) => i > -1), 'all four summary cards render');
+assert(cardOrder.every((v, i, a) => i === 0 || a[i - 1] < v), 'Open tasks leads the card row');
+assert(/class="ob-card ob-card-tasks"/.test(panel.innerHTML), 'the tasks card is the wide one');
+assert(panel.innerHTML.includes('<svg class="ob-ring"'), 'cleaning progress is a ring');
+assert(/data-ob-action="task-toggle"/.test(betaJs) && /data-ob-action="task-delete"/.test(betaJs),
+  'tasks keep their check and delete affordances');
+
+// Dense list: no vertical padding on cells, a fixed row height and a real
+// height budget — the prototype fits 18 rows in 1440x900.
+assert(
+  /\.ob-dispatch-table td \{[^}]*height:\s*26px[^}]*padding:\s*0 5px/.test(css),
+  'list rows keep the prototype density (26px cells, no vertical padding)'
+);
+assert(
+  /@media \(max-width: 1100px\)[^@]*\.ob-dispatch-row td \{[^}]*height:\s*auto/.test(css),
+  'the fixed cell height is released once rows become cards'
+);
+
+// The details cluster: check-in cycles on click, guests and ETA are inline and
+// borderless until focused.
+assert(/data-ob-action="checkin"[^>]*aria-label="Check-in [a-z]+ — click to cycle"/.test(panel.innerHTML),
+  'check-in cycles from the details cluster');
+assert(/class="ob-input ob-inline ob-row-pax"/.test(panel.innerHTML), 'guests are inline-editable');
+assert(/class="ob-input ob-inline ob-row-eta/.test(panel.innerHTML), 'the ETA is inline-editable');
+assert(/\.ob-inline \{[^}]*border:\s*0[^}]*background:\s*transparent/.test(css), 'inline fields are borderless at rest');
+assert(/\.ob-inline:focus \{[^}]*box-shadow:\s*inset/.test(css), 'inline fields grow a hairline on focus');
+// ob-empty is the no-results block (34px of padding); the ETA modifier must not
+// collide with it or every row inflates to 95px.
+assert(!/ob-row-eta ob-empty"/.test(panel.innerHTML), 'the blank-ETA modifier does not reuse the empty-state class');
+assert(/\.ob-row-eta\.ob-eta-empty/.test(css), 'the blank-ETA modifier has its own class');
+
+// Assign is the primary row action: one uniform navy-tinted pill with a
+// hairline — never dashed, never the gold accent.
+const assignCss = (css.match(/#tab-ops \.ob-assign \{[^}]*\}/) || [''])[0];
+assert(/border-radius:\s*999px/.test(assignCss), 'the assign control is a pill');
+assert(/box-shadow:\s*inset 0 0 0 1px rgba\(22, 40, 58/.test(assignCss), 'the pill carries a navy hairline');
+assert(!/dashed/.test(assignCss), 'the assign pill is not dashed');
+assert(!/gold|#c9a227|--ob-gold/.test(assignCss), 'gold is not spent on the assign pill');
+
+// Status is always a coloured dot AND a word, and it discriminates: a row with
+// no crew reads "Unassigned" rather than being swallowed by "Blocking".
+assert(/<span class="ob-row-status [a-z]+"><i><\/i>[A-Z]/.test(panel.innerHTML), 'status pairs a dot with a word');
+const statusWords = [...panel.innerHTML.matchAll(/<span class="ob-row-status [a-z]+"><i><\/i>([^<]+)</g)]
+  .map((m) => m[1]);
+assert(statusWords.includes('Unassigned'), 'unstaffed rows read as Unassigned');
+assert(new Set(statusWords).size >= 3, 'the status column tells more than one story');
+
+// Blocking rows get an inset accent, never a full-bleed red fill.
+assert(/\.ob-dispatch-row\.tone-hot td \{[^}]*background:\s*transparent/.test(css), 'blocking rows are not filled red');
+assert(
+  /\.ob-dispatch-row\.tone-hot td:first-child \{[^}]*box-shadow:\s*inset 3px 0 0/.test(css),
+  'blocking rows earn an inset left edge instead'
+);
+
+// Champagne gold means exactly one thing: the active selection.
+const goldUses = (css.match(/var\(--ob-gold[^)]*\)/g) || []).length;
+assert(goldUses > 0, 'the gold token is used');
+assert(/\.ob-filter\.on[^{]*\{[^}]*var\(--ob-gold/.test(css), 'the active filter chip is the gold one');
+
+// Card mode: a cell that would hold nothing but an em-dash is dropped rather
+// than becoming its own empty band.
+assert(/ob-cell-empty/.test(betaJs), 'placeholder cells are flagged for the card tiers');
+assert(
+  /@media \(max-width: 1100px\)[^@]*td\.ob-cell-empty \{[^}]*display:\s*none/.test(css),
+  'flagged placeholder cells are hidden once rows are cards'
+);
+
+// The panel opens by default on desktop and its inputs look like real inputs.
+assert(/panelOpen: true/.test(betaJs), 'the side panel is open by default on desktop');
+assert(
+  /#tab-ops \.ob-input,\s*#tab-ops \.ob-select \{[^}]*background:\s*var\(--ob-surface\)[^}]*box-shadow:\s*inset/.test(css),
+  'panel inputs are white with a hairline and a subtle inset'
+);
+assert(/class="ob-addtask"/.test(panel.innerHTML) || /ob-addlink/.test(betaJs), 'the panel uses quiet text links to add');
+
+console.log('daily-ops-beta-scale: ok (v2 design port + dispatch console, aligned menus, phone rail, row removal)');
