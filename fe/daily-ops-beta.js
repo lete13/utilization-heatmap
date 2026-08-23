@@ -842,8 +842,8 @@
     var circ = 2 * Math.PI * r;
     var off = circ * (1 - (pct / 100));
     return '<svg class="ob-ring" viewBox="0 0 64 64" aria-hidden="true">' +
-      '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="#efece6" stroke-width="4"></circle>' +
-      '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="#16283a" stroke-width="4" stroke-linecap="round" ' +
+      '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="#e4dccf" stroke-width="4"></circle>' +
+      '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="#c9a84c" stroke-width="4" stroke-linecap="round" ' +
         'stroke-dasharray="' + circ.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '" transform="rotate(-90 32 32)"></circle>' +
       '</svg>';
   }
