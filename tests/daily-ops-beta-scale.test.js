@@ -189,12 +189,16 @@ assert(panel.innerHTML.includes('ob-nchip hot'), 'PRIORITY / Late notes render a
 assert(panel.innerHTML.includes('ob-nchip cool'), 'sofa / Early notes render as blue chips');
 // The tag text sits in its own span so a long tag can ellipsize inside the chip
 // without pushing the remove button out of the notes cell.
-assert(/ob-nchip hot"><span>PRIORITY</.test(panel.innerHTML), 'PRIORITY chip is hot/red');
-assert(/ob-nchip hot"><span>Late Checkout: 12:00</.test(panel.innerHTML), 'Late chip is hot/red');
+// Chips label the tag rather than echo the stored token, so PRIORITY is shown
+// in sentence case while the underlying comment string is left alone.
+assert(/ob-nchip hot"><span>Priority</.test(panel.innerHTML), 'Priority chip is hot/red');
+assert(/ob-nchip hot"><span>Late checkout: 12:00</.test(panel.innerHTML), 'Late chip is hot/red');
 assert(/ob-nchip cool"><span>Prepare 1 sofa bed</.test(panel.innerHTML), 'sofa chip is cool/blue');
 assert(/ob-nchip cool"><span>Early check-in</.test(panel.innerHTML), 'Early chip is cool/blue');
+assert(!/>PRIORITY</.test(panel.innerHTML), 'no chip shouts the raw stored token');
+assert(rows[0].comments.includes('PRIORITY'), 'the stored comment token itself is untouched');
 assert(
-  /ob-nchip hot"><span>PRIORITY<\/span><button[^>]*data-ob-flag="priority"/.test(panel.innerHTML),
+  /ob-nchip hot"><span>Priority<\/span><button[^>]*data-ob-flag="priority"/.test(panel.innerHTML),
   'a flag-backed tag stays removable straight from its chip'
 );
 
@@ -661,9 +665,24 @@ assert(/data-ob-action="task-toggle"/.test(betaJs) && /data-ob-action="task-dele
 // Dense list: no vertical padding on cells, a fixed row height and a real
 // height budget — the prototype fits 18 rows in 1440x900.
 assert(
-  /\.ob-dispatch-table td \{[^}]*height:\s*26px[^}]*padding:\s*0 5px/.test(css),
-  'list rows keep the prototype density (26px cells, no vertical padding)'
+  /\.ob-dispatch-table td \{[^}]*height:\s*28px[^}]*padding:\s*0 5px/.test(css),
+  'list rows keep the prototype density (28px cells, no vertical padding)'
 );
+// The flexible columns must budget around the fixed ones. Bare percentages that
+// summed to 100% on top of 188px of fixed columns made `table-layout: fixed`
+// scale every column down, which clipped the stay cluster mid-word.
+const flexCols = ['ob-c-prop', 'ob-c-stay', 'ob-c-crew', 'ob-c-task', 'ob-c-note'].map((cls) => {
+  const rule = new RegExp('#tab-ops \\.' + cls + ' \\{[^}]*\\}').exec(css);
+  assert(rule, cls + ' declares a width');
+  const share = /calc\(\(100% - var\(--ob-fixedcols\)\) \* \.(\d+)\)/.exec(rule[0]);
+  assert(share, cls + ' budgets around the fixed columns instead of using a bare percentage');
+  return Number('.' + share[1]);
+});
+assert(
+  Math.abs(flexCols.reduce((sum, share) => sum + share, 0) - 1) < 1e-9,
+  'the flexible column shares add up to exactly the space left over'
+);
+assert(/--ob-fixedcols:\s*188px/.test(css), 'the fixed-column budget is stated once');
 assert(
   /@media \(max-width: 1100px\)[^@]*\.ob-dispatch-row td \{[^}]*height:\s*auto/.test(css),
   'the fixed cell height is released once rows become cards'
@@ -719,6 +738,57 @@ assert(
   'the active filter is a solid Mediterranean-blue selection'
 );
 assert(/stroke="#0e5fa7"/.test(betaJs), 'the progress ring carries the Aegean accent');
+
+// Presentation refinements: empty slots stop rendering as broken data, repeated
+// chrome recedes until the row is worked, and the area head closes with a rule
+// instead of flinging its clean count to the far edge.
+assert(
+  /if \(seg\.filled && prevFilled\) html \+= '<span class="ob-dot-sep">/.test(betaJs),
+  'interpuncts only join segments that actually carry a value'
+);
+assert(
+  /\(pax \? '<span class="ob-unit">guests<\/span>' : ''\)/.test(betaJs),
+  'the "guests" unit is dropped when there is no number beside it'
+);
+assert(/ob-ph/.test(betaJs), 'empty editable slots are flagged');
+assert(
+  /#tab-ops \.ob-ph \{[^}]*opacity:\s*0/.test(css) &&
+    /#tab-ops \.ob-dispatch-row:hover \.ob-ph[^{]*\{[^}]*opacity:\s*1/.test(css),
+  'empty slots stay hidden at rest and return on row hover or focus'
+);
+assert(
+  /\.ob-row-note::placeholder \{ color: transparent/.test(css),
+  'the per-row Note placeholder does not repeat down the whole column'
+);
+assert(
+  /#tab-ops \.ob-nchip button \{[^}]*opacity:\s*0/.test(css),
+  'tag remove buttons resolve on the row being worked, not on every row'
+);
+assert(/esc\(sentence\(part\)\)/.test(betaJs), 'stored tags are presented in sentence case');
+assert(
+  !/\/\^Long stay\/i\.test\(part\)\) return ' hot'/.test(betaJs),
+  'a long stay reads as information rather than as an exception'
+);
+assert(
+  /#tab-ops \.ob-grp-line::after \{[^}]*flex:\s*1 1 auto/.test(css),
+  'the area head closes with a rule so the clean count stays anchored to it'
+);
+assert(
+  !/#tab-ops \.ob-gclean \{[^}]*margin-left:\s*auto/.test(css),
+  'the clean pill is no longer pushed to the far right edge'
+);
+assert(
+  /#tab-ops \.ob-num \{[^}]*min-width:\s*15px[^}]*text-align:\s*right/.test(css),
+  'the row numeral gutter is fixed width so names align'
+);
+assert(
+  /state\.group === 'area' \? '' : area/.test(betaJs),
+  'the sub line drops the area when the board is already grouped by it'
+);
+assert(
+  /#tab-ops \.ob-ci\.ob-unknown \{ color: var\(--ob-muted\)/.test(css),
+  'an unanswered check-in is muted, leaving amber to the status column'
+);
 
 // Card mode: a cell that would hold nothing but an em-dash is dropped rather
 // than becoming its own empty band.

@@ -431,8 +431,10 @@
 
   function partTone(part) {
     if (part === tagPriority() || part === tagLate() || /^Late Checkout/i.test(part)) return ' hot';
-    if (part === tagEarly() || part === tagPark() || /sofa bed/i.test(part)) return ' cool';
-    if (/^Long stay/i.test(part)) return ' hot';
+    // A long stay is a fact about the booking, not an exception to chase, so it
+    // reads as information. Warm tags stay reserved for things that need a
+    // decision today.
+    if (part === tagEarly() || part === tagPark() || /sofa bed/i.test(part) || /^Long stay/i.test(part)) return ' cool';
     return '';
   }
 
@@ -457,6 +459,8 @@
     return parts.join(NOTE_SEP);
   }
 
+  // Stored tags arrive shouting ("PRIORITY"); the chip is a label, so it is
+  // presented in sentence case while the stored token is left untouched.
   function noteChipsHtml(note, index, extra) {
     var parts = managedParts(note);
     if (!parts.length) return '';
@@ -465,7 +469,7 @@
       var remove = flag
         ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Remove ' + esc(part) + '">×</button>'
         : '';
-      return '<span class="ob-nchip' + partTone(part) + '"><span>' + esc(part) + '</span>' + remove + '</span>';
+      return '<span class="ob-nchip' + partTone(part) + '"><span>' + esc(sentence(part)) + '</span>' + remove + '</span>';
     }).join('') + '</div>';
   }
 
@@ -477,12 +481,12 @@
   function detailsHtml(item) {
     var row = item.row || {};
     var index = item.index;
-    var out = [];
+    var segs = [];
 
     if (item.extra) {
-      out.push('<span class="ob-ci ob-static">Extra clean</span>');
+      segs.push({ filled: true, html: '<span class="ob-ci ob-static">Extra clean</span>' });
     } else if (isArrivalOnly(row)) {
-      out.push('<span class="ob-ci ob-yes ob-static">Arrival</span>');
+      segs.push({ filled: true, html: '<span class="ob-ci ob-yes ob-static">Arrival</span>' });
     } else {
       var stateName = row.checkinSameDay || 'unknown';
       var cfg = stateName === 'yes'
@@ -490,28 +494,55 @@
         : stateName === 'no'
           ? { cls: '', text: 'Check-in no' }
           : { cls: 'ob-unknown', text: 'Check-in unknown' };
-      out.push('<button type="button" class="ob-ci ' + cfg.cls + '" data-ob-action="checkin" data-ob-index="' + index +
-        '" aria-label="' + esc(cfg.text) + ' — click to cycle">' + esc(cfg.text) + '</button>');
+      segs.push({
+        filled: true,
+        html: '<button type="button" class="ob-ci ' + cfg.cls + '" data-ob-action="checkin" data-ob-index="' + index +
+          '" aria-label="' + esc(cfg.text) + ' — click to cycle">' + esc(cfg.text) + '</button>'
+      });
     }
 
+    var pax = String(row.people == null ? '' : row.people);
     if (item.extra) {
-      out.push('<span class="ob-paxwrap"><span class="ob-inline">' + esc(row.people || '—') + '</span><span class="ob-unit">guests</span></span>');
+      segs.push({
+        filled: !!pax,
+        html: '<span class="ob-paxwrap' + (pax ? '' : ' ob-ph') + '"><span class="ob-inline">' + esc(pax || '—') + '</span>' +
+          (pax ? '<span class="ob-unit">guests</span>' : '') + '</span>'
+      });
     } else {
-      out.push('<span class="ob-paxwrap">' +
-        '<input class="ob-input ob-inline ob-row-pax" type="number" min="0" max="20" value="' + esc(row.people || '') +
-        '" data-ob-action="row-field" data-ob-index="' + index + '" data-ob-field="people" data-ob-focus="pax:' + index +
-        '" placeholder="—" aria-label="Guests"><span class="ob-unit">guests</span></span>');
+      // The unit only earns its space next to a number; "— guests" was reading
+      // as a broken value rather than as an empty field.
+      segs.push({
+        filled: !!pax,
+        html: '<span class="ob-paxwrap' + (pax ? '' : ' ob-ph') + '">' +
+          '<input class="ob-input ob-inline ob-row-pax" type="number" min="0" max="20" value="' + esc(pax) +
+          '" data-ob-action="row-field" data-ob-index="' + index + '" data-ob-field="people" data-ob-focus="pax:' + index +
+          '" placeholder="—" aria-label="Guests">' + (pax ? '<span class="ob-unit">guests</span>' : '') + '</span>'
+      });
       var eta = String(row.arrivalTime || '');
-      out.push('<input class="ob-input ob-inline ob-row-eta' + (eta ? '' : ' ob-eta-empty') + '" value="' + esc(eta) +
-        '" data-ob-action="row-field" data-ob-index="' + index + '" data-ob-field="arrivalTime" data-ob-focus="eta:' + index +
-        '" placeholder="—" aria-label="Arrival time">');
+      segs.push({
+        filled: !!eta,
+        html: '<span class="ob-etawrap' + (eta ? '' : ' ob-ph') + '">' +
+          '<input class="ob-input ob-inline ob-row-eta' + (eta ? '' : ' ob-eta-empty') + '" value="' + esc(eta) +
+          '" data-ob-action="row-field" data-ob-index="' + index + '" data-ob-field="arrivalTime" data-ob-focus="eta:' + index +
+          '" placeholder="—" aria-label="Arrival time"></span>'
+      });
     }
 
     if (!item.extra && row.nextNights && (row.checkinSameDay === 'yes' || isArrivalOnly(row))) {
-      out.push('<span class="ob-nights">' + esc(row.nextNights) + ' nights</span>');
+      segs.push({ filled: true, html: '<span class="ob-nights">' + esc(row.nextNights) + ' nights</span>' });
     }
 
-    return '<div class="ob-details">' + out.join('<span class="ob-dot-sep">·</span>') + '</div>';
+    // An interpunct only ever joins two segments that carry a value. Separating
+    // the empty slots too left a trail of "· — · —" behind most rows and, once
+    // the column was tight, pushed the real values out of view.
+    var html = '';
+    var prevFilled = false;
+    segs.forEach(function (seg) {
+      if (seg.filled && prevFilled) html += '<span class="ob-dot-sep">·</span>';
+      html += seg.html;
+      if (seg.filled) prevFilled = true;
+    });
+    return '<div class="ob-details">' + html + '</div>';
   }
 
   var FLAG_DEFS = [
@@ -674,7 +705,10 @@
       (row.isOwner ? '<span class="ob-badge ob-k-owner">Owner</span>' : '') +
       (isArrivalOnly(row) ? '<span class="ob-badge ob-k-arrival">Arrival only</span>' : '') +
       (type && type.exception ? '<span class="ob-badge ' + type.cls + '">' + esc(type.label) + '</span>' : '');
-    var sub = [type ? type.label : 'No clean', area, lines.addr].filter(Boolean).join(' · ');
+    // The area already titles the group it sits under, so repeating it on every
+    // sub line spent the row's remaining width on a word the operator just read.
+    var subArea = state.group === 'area' ? '' : area;
+    var sub = [type ? type.label : 'No clean', subArea, lines.addr].filter(Boolean).join(' · ');
 
     // In card mode every cell becomes its own line, so a cell holding nothing
     // but an em-dash placeholder is dead weight — flag it for the card tiers.
