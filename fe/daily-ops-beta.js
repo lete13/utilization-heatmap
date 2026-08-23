@@ -733,12 +733,14 @@
     }).join('');
     // OPS_KINDS carries short word icons ("Mnt", "Prep") meant for the legacy
     // square buttons. They do not fit an 18px gutter and only repeat the label
-    // next to them, so the kind rows leave the icon track empty and rely on the
-    // tick to show state.
+    // next to them, so the gutter carries the same colour marker the row badge
+    // uses instead — the flags above have their glyphs, and a kind row with an
+    // empty gutter had no visual cue at all.
     var kindButtons = kinds.map(function (kind) {
+      var tone = String(kind.key || '').replace(/^is/, '').toLowerCase();
       return menuItemHtml(
         'data-ob-action="kind" data-ob-index="' + item.index + '" data-ob-kind="' + esc(kind.key) + '"',
-        '', sentence(kind.label || kind.key), !!row[kind.key]
+        '<i class="ob-mi-dot ob-k-' + esc(tone) + '"></i>', sentence(kind.label || kind.key), !!row[kind.key]
       );
     }).join('');
     return '<div class="ob-menu">' +

@@ -871,6 +871,13 @@ assert(
   'the summary numbers that demand action carry a tint'
 );
 assert(/class="ob-card ob-card-unassigned"/.test(panel.innerHTML), 'the unassigned card is addressable');
+// The flag rows in the ⋯ menu have their glyphs; a kind row's gutter was empty,
+// so it now carries the marker matching the badge it produces.
+assert(/<i class="ob-mi-dot ob-k-[a-z]+"><\/i>/.test(betaJs), 'kind rows in the row menu carry a colour marker');
+assert(
+  /#tab-ops \.ob-mi-dot\.ob-k-maintenance \{ background: #/.test(css),
+  'the menu marker uses the same vocabulary as the row badge'
+);
 assert(
   /#tab-ops \.ob-sr \{[^}]*clip-path:\s*inset\(50%\)/.test(css),
   'the collapsed tag names are visually hidden rather than a tooltip'

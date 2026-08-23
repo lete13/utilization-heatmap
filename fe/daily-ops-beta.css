@@ -1824,6 +1824,13 @@
 #tab-ops .ob-badge.ob-k-owner { background: #fbe9e7; color: #a33327; }
 #tab-ops .ob-badge.ob-k-arrival { background: #e7efec; color: var(--ob-accent); }
 
+/* The kind rows in the ⋯ menu carry the same marker as the badge they produce,
+   so the menu and the board share one colour vocabulary. */
+#tab-ops .ob-mi-dot { width: 7px; height: 7px; border-radius: 50%; background: #c3c7c3; }
+#tab-ops .ob-mi-dot.ob-k-maintenance { background: #7c4dab; }
+#tab-ops .ob-mi-dot.ob-k-preparation { background: #3d78a8; }
+#tab-ops .ob-mi-dot.ob-k-extended { background: #2f6a4a; }
+
 /* A little colour on the numbers that answer "what needs me today", matching how
    Keys Hubs tints its stat values. */
 #tab-ops .ob-card-prog .ob-ring-num { color: var(--ob-accent); }
