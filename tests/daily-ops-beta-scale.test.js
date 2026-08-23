@@ -189,14 +189,26 @@ assert(panel.innerHTML.includes('ob-nchip hot'), 'PRIORITY / Late notes render a
 assert(panel.innerHTML.includes('ob-nchip cool'), 'sofa / Early notes render as blue chips');
 // The tag text sits in its own span so a long tag can ellipsize inside the chip
 // without pushing the remove button out of the notes cell.
-assert(/ob-nchip hot"><span>PRIORITY</.test(panel.innerHTML), 'PRIORITY chip is hot/red');
-assert(/ob-nchip hot"><span>Late Checkout: 12:00</.test(panel.innerHTML), 'Late chip is hot/red');
-assert(/ob-nchip cool"><span>Prepare 1 sofa bed</.test(panel.innerHTML), 'sofa chip is cool/blue');
-assert(/ob-nchip cool"><span>Early check-in</.test(panel.innerHTML), 'Early chip is cool/blue');
+// Chips label the tag rather than echo the stored token, so PRIORITY is shown
+// in sentence case while the underlying comment string is left alone. The notes
+// column is ~138px wide and also holds the free-text field, so only the leading
+// tag is drawn and the remainder becomes a hover-titled count.
+assert(/ob-nchip hot"><span>Priority</.test(panel.innerHTML), 'the actionable flag leads and is hot/red');
+assert(!/>PRIORITY</.test(panel.innerHTML), 'no chip shouts the raw stored token');
+assert(rows[0].comments.includes('PRIORITY'), 'the stored comment token itself is untouched');
 assert(
-  /ob-nchip hot"><span>PRIORITY<\/span><button[^>]*data-ob-flag="priority"/.test(panel.innerHTML),
+  /ob-nchip hot"><span>Priority<\/span><button[^>]*data-ob-flag="priority"/.test(panel.innerHTML),
   'a flag-backed tag stays removable straight from its chip'
 );
+const moreChip = new RegExp(
+  '<span class="ob-nchip ob-nmore"><span aria-hidden="true">\\+(\\d+)</span>' +
+  '<span class="ob-sr">([^<]*)</span></span>'
+).exec(panel.innerHTML);
+assert(moreChip, 'the tags that do not fit collapse into a count');
+assert(Number(moreChip[1]) === 3, 'the count covers the three remaining tags');
+['Late 12:00', 'Prepare 1 sofa bed', 'Early check-in'].forEach((label) => {
+  assert(moreChip[2].includes(label), 'the count names ' + label + ' for assistive tech');
+});
 
 const css = fs.readFileSync(path.join(rootDir, 'fe', 'daily-ops-beta.css'), 'utf8');
 assert(/\.ob-nchip\.hot/.test(css) && /\.ob-nchip\.cool/.test(css), 'note chip color styles present');
@@ -495,12 +507,45 @@ assert(
   /\.ob-segs\s*\{[^}]*radial-gradient\(farthest-side at 100% 50%/.test(css),
   'chips carry a scroll-shadow affordance showing there is more to reach'
 );
-[760, 520].forEach((tier) => {
+[1100, 760, 520].forEach((tier) => {
   assert(
     !new RegExp('@media \\(max-width: ' + tier + 'px\\)[^@]*\\.ob-segs\\s*\\{[^}]*display:\\s*none').test(css),
     'the rail is never hidden at the ' + tier + 'px tier'
   );
 });
+
+// The app shell keeps a ~216px nav at every width, so the tab runs ~300px
+// narrower than the viewport. "Not display:none" was not enough on its own: at
+// 768 the non-shrinking tools cluster starved the chip strip down to 8px, which
+// reads exactly like the filters being gone. The tools must take their own line
+// from the card tier down, and the sticky offsets must follow the taller rail.
+const tabletRail = /@media \(max-width: 1100px\)[^@]*/.exec(css);
+assert(tabletRail, 'the card tier exists');
+assert(
+  /#tab-ops \.ob-rail\s*\{[^}]*flex-wrap:\s*wrap/.test(tabletRail[0]),
+  'the rail wraps at the card tier instead of crushing the chips'
+);
+assert(
+  /#tab-ops \.ob-segs\s*\{[^}]*flex:\s*1 1 100%/.test(tabletRail[0]),
+  'the chip strip claims a full line of the wrapped rail'
+);
+assert(
+  /#tab-ops \.ob-railtools\s*\{[^}]*width:\s*100%/.test(tabletRail[0]),
+  'search / group / sort drop to their own line rather than starving the chips'
+);
+assert(
+  /--ob-rail:\s*80px/.test(tabletRail[0]) && /--ob-stick:\s*130px/.test(tabletRail[0]),
+  'the sticky offsets are re-pointed to the taller wrapped rail'
+);
+// --ob-stick is documented as a literal sum of the bar and rail; keep it true so
+// the bulk bar and the pinned area headers cannot creep under the rail.
+const barPx = Number(/--ob-bar:\s*(\d+)px/.exec(css)[1]);
+const railPx = Number(/--ob-rail:\s*(\d+)px/.exec(tabletRail[0])[1]);
+const stickPx = Number(/--ob-stick:\s*(\d+)px/.exec(tabletRail[0])[1]);
+assert(
+  stickPx === barPx + railPx,
+  'the card-tier sticky offset stays the sum of the bar and the wrapped rail'
+);
 
 // 4. Mobile day bar and list header get room to breathe instead of clipping.
 assert(
@@ -628,9 +673,34 @@ assert(/data-ob-action="task-toggle"/.test(betaJs) && /data-ob-action="task-dele
 // Dense list: no vertical padding on cells, a fixed row height and a real
 // height budget — the prototype fits 18 rows in 1440x900.
 assert(
-  /\.ob-dispatch-table td \{[^}]*height:\s*26px[^}]*padding:\s*0 5px/.test(css),
-  'list rows keep the prototype density (26px cells, no vertical padding)'
+  /\.ob-dispatch-table td \{[^}]*height:\s*28px[^}]*padding:\s*0 5px/.test(css),
+  'list rows keep the prototype density (28px cells, no vertical padding)'
 );
+// The flexible columns must leave room for the four px control columns. Two
+// ways of writing this were measured against the live board at 1440px and both
+// clipped the stay cluster mid-word: percentages summing to 100% over-constrain
+// the row (stay collapsed to 156px), and a calc() percentage is treated as
+// `auto` by Chrome under table-layout: fixed, which split the leftover equally
+// (every flexible column came out at 142px).
+const flexCols = ['ob-c-prop', 'ob-c-stay', 'ob-c-crew', 'ob-c-task', 'ob-c-note'].map((cls) => {
+  const rule = new RegExp('#tab-ops \\.' + cls + ' \\{[^}]*\\}').exec(css);
+  assert(rule, cls + ' declares a width');
+  assert(!/calc\(/.test(rule[0]), cls + ' avoids calc(): Chrome ignores it on a fixed-layout column');
+  const share = /width:\s*([\d.]+)%/.exec(rule[0]);
+  assert(share, cls + ' is a plain percentage');
+  return Number(share[1]);
+});
+const flexTotal = flexCols.reduce((sum, share) => sum + share, 0);
+assert(
+  flexTotal > 74 && flexTotal < 82,
+  'the flexible columns leave the px control columns their ~21% instead of claiming the whole table'
+);
+['ob-c-sel', 'ob-c-tick', 'ob-c-status', 'ob-c-act'].forEach((cls) => {
+  assert(
+    new RegExp('#tab-ops \\.' + cls + ' \\{ width: \\d+px').test(css),
+    cls + ' stays a fixed pixel column because it holds a fixed-size control'
+  );
+});
 assert(
   /@media \(max-width: 1100px\)[^@]*\.ob-dispatch-row td \{[^}]*height:\s*auto/.test(css),
   'the fixed cell height is released once rows become cards'
@@ -649,13 +719,12 @@ assert(/\.ob-inline:focus \{[^}]*box-shadow:\s*inset/.test(css), 'inline fields 
 assert(!/ob-row-eta ob-empty"/.test(panel.innerHTML), 'the blank-ETA modifier does not reuse the empty-state class');
 assert(/\.ob-row-eta\.ob-eta-empty/.test(css), 'the blank-ETA modifier has its own class');
 
-// Assign is the primary row action: one uniform navy-tinted pill with a
-// hairline — never dashed, never the gold accent.
+// Assign is the primary row action: one uniform tinted pill with a hairline —
+// never dashed and never confused with the solid active-selection treatment.
 const assignCss = (css.match(/#tab-ops \.ob-assign \{[^}]*\}/) || [''])[0];
 assert(/border-radius:\s*999px/.test(assignCss), 'the assign control is a pill');
 assert(/box-shadow:\s*inset 0 0 0 1px rgba\(22, 40, 58/.test(assignCss), 'the pill carries a navy hairline');
 assert(!/dashed/.test(assignCss), 'the assign pill is not dashed');
-assert(!/gold|#c9a227|--ob-gold/.test(assignCss), 'gold is not spent on the assign pill');
 
 // Status is always a coloured dot AND a word, and it discriminates: a row with
 // no crew reads "Unassigned" rather than being swallowed by "Blocking".
@@ -672,10 +741,103 @@ assert(
   'blocking rows earn an inset left edge instead'
 );
 
-// Champagne gold means exactly one thing: the active selection.
-const goldUses = (css.match(/var\(--ob-gold[^)]*\)/g) || []).length;
-assert(goldUses > 0, 'the gold token is used');
-assert(/\.ob-filter\.on[^{]*\{[^}]*var\(--ob-gold/.test(css), 'the active filter chip is the gold one');
+// Aegean Editorial is a full visual system, not a colour-only swap: limestone
+// canvas, ivory surfaces, Mediterranean blue selection, editorial serif
+// hierarchy and softer geometry all arrive together.
+const aegean = css.slice(css.indexOf('/* ── Aegean Editorial'));
+assert(aegean.length > 1000, 'the Aegean Editorial overlay is present');
+assert(/--ob-canvas:\s*#f2eee5/.test(aegean), 'the canvas is limestone');
+assert(/--ob-surface:\s*#fffdf8/.test(aegean), 'surfaces are sun-washed ivory');
+assert(/--ob-accent:\s*#0e5fa7/.test(aegean), 'Mediterranean blue owns the accent');
+assert(/--ob-serif:\s*Georgia/.test(aegean), 'editorial headings use a serif voice');
+assert(/--ob-r-lg:\s*18px/.test(aegean), 'cards use the softer Aegean geometry');
+assert(
+  /\.ob-filter\.on\s*\{[^}]*background:\s*var\(--ob-accent\)[^}]*color:\s*#ffffff/.test(aegean),
+  'the active filter is a solid Mediterranean-blue selection'
+);
+assert(/stroke="#0e5fa7"/.test(betaJs), 'the progress ring carries the Aegean accent');
+
+// Presentation refinements: empty slots stop rendering as broken data, repeated
+// chrome recedes until the row is worked, and the area head closes with a rule
+// instead of flinging its clean count to the far edge.
+assert(
+  /if \(seg\.filled && prevFilled\) html \+= '<span class="ob-dot-sep">/.test(betaJs),
+  'interpuncts only join segments that actually carry a value'
+);
+// A single line needed 225px against the ~175px the column can give, and a flex
+// row cannot ellipsize, so the surplus was hard-clipped mid-word ("7 ni").
+assert(
+  /class="ob-det-line ob-det-lead"/.test(panel.innerHTML) && /class="ob-det-line ob-det-sub"/.test(panel.innerHTML),
+  'the stay cell reads as a lead line and a sub line rather than one long row'
+);
+const leadLine = /<div class="ob-det-line ob-det-lead">(.*?)<\/div>/.exec(panel.innerHTML);
+assert(leadLine && /ob-ci/.test(leadLine[1]), 'the check-in state leads the stay cell');
+assert(!/ob-row-pax/.test(leadLine[1]), 'the editable particulars are not on the lead line');
+assert(
+  /#tab-ops \.ob-det-lead \{[^}]*font-size:\s*11px/.test(css) &&
+    /#tab-ops \.ob-det-sub \{[^}]*font-size:\s*10\.5px/.test(css),
+  'the sub line is typographically subordinate to the lead line'
+);
+assert(/nights === 1 \? ' night' : ' nights'/.test(betaJs), 'a single night is not written as "1 nights"');
+assert(
+  /\(pax \? '<span class="ob-unit">guests<\/span>' : ''\)/.test(betaJs),
+  'the "guests" unit is dropped when there is no number beside it'
+);
+assert(/ob-ph/.test(betaJs), 'empty editable slots are flagged');
+assert(
+  /#tab-ops \.ob-ph \{[^}]*opacity:\s*0/.test(css) &&
+    /#tab-ops \.ob-dispatch-row:hover \.ob-ph[^{]*\{[^}]*opacity:\s*1/.test(css),
+  'empty slots stay hidden at rest and return on row hover or focus'
+);
+assert(
+  /\.ob-row-note::placeholder \{ color: transparent/.test(css),
+  'the per-row Note placeholder does not repeat down the whole column'
+);
+// The × gives its ~9px back to the label at rest, which is what let the leading
+// tag stop rendering as "Lat…" in a 138px column.
+assert(/#tab-ops \.ob-nchip button \{ display: none/.test(css), 'the × leaves the layout at rest');
+assert(
+  /#tab-ops \.ob-dispatch-row:hover \.ob-nchip button \{ display: inline-block/.test(css),
+  'the × returns on the row being worked'
+);
+assert(/\.ob-row-note:focus \{[^}]*min-width:\s*96px/.test(css), 'the note field claims room to type on focus');
+assert(
+  /#tab-ops \.ob-nchip\.ob-nmore \{[^}]*flex:\s*none/.test(css),
+  'the overflow count never shrinks into an ellipsis itself'
+);
+assert(
+  /#tab-ops \.ob-sr \{[^}]*clip-path:\s*inset\(50%\)/.test(css),
+  'the collapsed tag names are visually hidden rather than a tooltip'
+);
+assert(/function chipLabel\(part\)/.test(betaJs), 'chips present a label rather than the stored token');
+assert(
+  /if \(\/\^Long stay\/i\.test\(text\)\) return 'Long stay';/.test(betaJs),
+  'a long-stay tag drops the nights the Stay column already states'
+);
+assert(
+  !/\/\^Long stay\/i\.test\(part\)\) return ' hot'/.test(betaJs),
+  'a long stay reads as information rather than as an exception'
+);
+assert(
+  /#tab-ops \.ob-grp-line::after \{[^}]*flex:\s*1 1 auto/.test(css),
+  'the area head closes with a rule so the clean count stays anchored to it'
+);
+assert(
+  !/#tab-ops \.ob-gclean \{[^}]*margin-left:\s*auto/.test(css),
+  'the clean pill is no longer pushed to the far right edge'
+);
+assert(
+  /#tab-ops \.ob-num \{[^}]*min-width:\s*15px[^}]*text-align:\s*right/.test(css),
+  'the row numeral gutter is fixed width so names align'
+);
+assert(
+  /state\.group === 'area' \? '' : area/.test(betaJs),
+  'the sub line drops the area when the board is already grouped by it'
+);
+assert(
+  /#tab-ops \.ob-ci\.ob-unknown \{ color: var\(--ob-muted\)/.test(css),
+  'an unanswered check-in is muted, leaving amber to the status column'
+);
 
 // Card mode: a cell that would hold nothing but an em-dash is dropped rather
 // than becoming its own empty band.

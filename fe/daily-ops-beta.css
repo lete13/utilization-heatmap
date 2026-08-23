@@ -562,8 +562,11 @@
 #tab-ops .ob-dispatch-table th:first-child { padding-left: 18px; }
 #tab-ops .ob-dispatch-table th:last-child { padding-right: 18px; }
 
+/* 28px is what the two-line property cell actually occupies (name + sub line).
+   Declaring 26px let every row silently overflow its own height, which is what
+   made the list read as cramped rather than dense. */
 #tab-ops .ob-dispatch-table td {
-  height: 26px;
+  height: 28px;
   padding: 0 5px;
   background: transparent;
   vertical-align: middle;
@@ -576,13 +579,30 @@
 #tab-ops .ob-dispatch-table td:first-child { padding-left: 18px; }
 #tab-ops .ob-dispatch-table td:last-child { padding-right: 18px; }
 
+/* Column budget. Two rules of this table decide the numbers below:
+   1. The four control columns are stated in px because they hold fixed-size
+      controls (checkbox, tick, status word, ⋯ button).
+   2. The five flexible columns are plain percentages that deliberately sum to
+      79%, not 100%. Under `table-layout: fixed` a percentage resolves against
+      the whole table, so percentages summing to 100% on top of 188px of px
+      columns over-constrain the row and every column gets scaled down —
+      measured at 1440px that left the stay column at 156px and clipped its
+      text mid-word ("7 ni"). Leaving the px columns their share keeps the
+      widths honest: 188/896 ≈ 21%.
+   Do not restate these as calc((100% - 188px) * n): Chrome treats a calc()
+   percentage on a fixed-layout column as `auto` and falls back to splitting
+   the leftover equally, which measured 142px for all five columns. */
 #tab-ops .ob-c-sel { width: 32px; }
 #tab-ops .ob-c-tick { width: 34px; }
-#tab-ops .ob-c-prop { width: 23%; }
-#tab-ops .ob-c-stay { width: 22%; }
-#tab-ops .ob-c-crew { width: 17%; }
-#tab-ops .ob-c-task { width: 12%; }
-#tab-ops .ob-c-note { width: 26%; }
+#tab-ops .ob-c-prop { width: 21%; }
+#tab-ops .ob-c-stay { width: 19.5%; }
+#tab-ops .ob-c-crew { width: 12%; }
+/* 9% left "Cleaning" 43px of content box for 47px of text, so the label sat on
+   its own caret. The point comes from Cleaner rather than Notes: a crew cell
+   holds one short name plus a ＋, while Notes still has to seat a tag, a count
+   and the free-text field. */
+#tab-ops .ob-c-task { width: 10%; }
+#tab-ops .ob-c-note { width: 16.5%; }
 #tab-ops .ob-c-status { width: 92px; }
 #tab-ops .ob-c-act { width: 30px; }
 #tab-ops .ob-center { text-align: center; }
@@ -599,8 +619,16 @@
 #tab-ops .ob-grp-line { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 #tab-ops .ob-grp-line b { color: var(--ob-navy); font-family: var(--ob-serif); font-size: 13px; font-weight: 500; letter-spacing: .02em; }
 #tab-ops .ob-grp-line em { color: #aeb3b9; font-size: 10.5px; font-style: normal; }
+/* An editorial rule closes the area head instead of flinging the clean count to
+   the far right edge, where it read as a stray pill belonging to no row. */
+#tab-ops .ob-grp-line::after {
+  content: "";
+  flex: 1 1 auto;
+  min-width: 12px;
+  height: 1px;
+  background: var(--ob-line-2);
+}
 #tab-ops .ob-gclean {
-  margin-left: auto;
   padding: 1px 8px;
   border-radius: 999px;
   background: rgba(22, 40, 58, .05);
@@ -689,14 +717,22 @@
   line-height: 1.15;
 }
 #tab-ops .ob-nm b { min-width: 0; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-#tab-ops .ob-num { flex: none; color: #b4b9bf; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+/* A fixed, right-aligned numeral gutter: shrink-to-fit let one- and two-digit
+   rows start their apartment name at different x positions. */
+#tab-ops .ob-num {
+  flex: none;
+  min-width: 15px;
+  color: #b4b9bf;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
 #tab-ops .ob-sub {
   display: block;
-  margin-top: 1px;
   overflow: hidden;
   color: #9ba1a8;
   font-size: 10.5px;
-  line-height: 1.1;
+  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -717,15 +753,29 @@
 #tab-ops .ob-badge.ob-k-owner { background: #faefec; color: #a0524a; }
 #tab-ops .ob-badge.ob-k-arrival { background: #eef2f7; color: #4e6e90; }
 
-/* one human-readable details cluster: check-in · guests · eta */
-#tab-ops .ob-details {
+/* The details read as two lines, mirroring the property cell: what happens
+   today on the lead line, the editable particulars under it. As one line the
+   cluster needed 225px against the ~175px the column can honestly give, and
+   the surplus was hard-clipped mid-word because a flex row cannot ellipsize. */
+#tab-ops .ob-details { overflow: hidden; }
+#tab-ops .ob-det-line {
   display: flex;
   align-items: center;
   gap: 4px;
   overflow: hidden;
-  color: #9aa0a7;
-  font-size: 11px;
   white-space: nowrap;
+}
+#tab-ops .ob-det-lead { color: var(--ob-ink-2); font-size: 11px; line-height: 1.15; }
+#tab-ops .ob-det-sub { color: #a9aeb5; font-size: 10.5px; line-height: 1.15; }
+/* The two inline inputs bring their own intrinsic height; left alone they made
+   the sub line taller than its own text and pushed every row from 28px to 33px,
+   which cost the board three visible rows at 1440x900. */
+#tab-ops .ob-det-sub .ob-inline {
+  height: 13px;
+  min-height: 0;
+  padding: 0 3px;
+  font-size: 10.5px;
+  line-height: 13px;
 }
 #tab-ops .ob-dot-sep { flex: none; color: #c9cdd2; font-size: 10px; }
 #tab-ops .ob-ci {
@@ -742,12 +792,22 @@
 }
 #tab-ops .ob-ci:hover { background: rgba(22, 40, 58, .05); color: var(--ob-ink-2); }
 #tab-ops .ob-ci.ob-yes { color: var(--ob-navy); font-weight: 500; }
-#tab-ops .ob-ci.ob-unknown { color: var(--ob-amber); }
+/* A missing check-in answer is an absence of information, not an alarm. The
+   amber warning lives in the status column, so tinting this label as well
+   stacked two oranges on most rows and drowned the real exceptions. */
+#tab-ops .ob-ci.ob-unknown { color: var(--ob-muted); }
 #tab-ops .ob-ci.ob-static { cursor: default; }
 #tab-ops .ob-ci.ob-static:hover { background: transparent; color: #9aa0a7; }
-#tab-ops .ob-paxwrap { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+#tab-ops .ob-paxwrap,
+#tab-ops .ob-etawrap { display: inline-flex; align-items: center; gap: 2px; flex: none; }
 #tab-ops .ob-unit { flex: none; color: #a9aeb5; }
 #tab-ops .ob-nights { flex: none; color: #a9aeb5; }
+/* Empty editable slots keep their place in the row but stop advertising it:
+   a column of dashes reads as broken data rather than as "nothing entered".
+   Hovering or focusing the row brings them back. */
+#tab-ops .ob-ph { opacity: 0; transition: opacity .12s ease; }
+#tab-ops .ob-dispatch-row:hover .ob-ph,
+#tab-ops .ob-ph:focus-within { opacity: 1; }
 /* borderless until focused */
 #tab-ops .ob-inline {
   min-height: 0;
@@ -854,14 +914,45 @@
   font-size: 12px;
   line-height: 1;
 }
+/* The × is a per-chip destructive control; at rest it is dead ink beside every
+   tag, so it leaves the layout entirely and gives its ~9px back to the label,
+   returning on the row the operator is actually working. */
+#tab-ops .ob-nchip button { display: none; }
+#tab-ops .ob-dispatch-row:hover .ob-nchip button { display: inline-block; }
 #tab-ops .ob-nchip button:hover { color: var(--ob-red); }
+/* Names things for assistive tech without painting anything — the board has a
+   standing rule against title=, which Chrome renders as a black popup. */
+#tab-ops .ob-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* the count stands in for the tags that would not fit, so it never shrinks */
+#tab-ops .ob-nchip.ob-nmore {
+  flex: none;
+  min-width: 0;
+  padding: 0 6px;
+  background: #e8edf2;
+  color: #5f6c78;
+  cursor: default;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
 /* attention tags read as a flag, not as the gold accent */
 #tab-ops .ob-nchip.hot { background: #faefec; color: #a0524a; font-weight: 500; }
 #tab-ops .ob-nchip.hot button { color: #c79c95; }
 #tab-ops .ob-nchip.cool { background: #eef2f7; color: #4e6e90; }
+/* At rest the field is an invisible affordance, so it only reserves enough to
+   stay clickable and lets the leading tag keep its letters; taking focus it
+   claims real room to type in and the tag ellipsizes for the duration. */
 #tab-ops .ob-row-note {
   flex: 1 1 40px;
-  min-width: 44px;
+  min-width: 34px;
   height: 22px;
   min-height: 22px;
   padding: 0 6px;
@@ -873,7 +964,11 @@
   font-size: 11.5px;
 }
 #tab-ops .ob-row-note:hover { border: 0; background: rgba(22, 40, 58, .04); }
-#tab-ops .ob-row-note:focus { border: 0; background: #ffffff; box-shadow: inset 0 0 0 1px #e4dfd4; color: var(--ob-navy-2); }
+#tab-ops .ob-row-note:focus { border: 0; background: #ffffff; box-shadow: inset 0 0 0 1px #e4dfd4; color: var(--ob-navy-2); min-width: 96px; }
+/* Thirty rows each repeating the word "Note" is chrome, not content. */
+#tab-ops .ob-dispatch-row .ob-row-note::placeholder { color: transparent; }
+#tab-ops .ob-dispatch-row:hover .ob-row-note::placeholder,
+#tab-ops .ob-dispatch-row .ob-row-note:focus::placeholder { color: #b9bec4; }
 
 /* task select: borderless in the row, real control on focus */
 #tab-ops .ob-row-task {
@@ -1340,6 +1435,22 @@
   #tab-ops .ob-datebar,
   #tab-ops .ob-savestate { flex: 0 0 auto; }
   #tab-ops .ob-dispatch-row td { height: auto; }
+  /* The app shell keeps its ~216px nav all the way down, so the tab is roughly
+     300px narrower than the viewport. Long before the 760px tier the search and
+     the two selects stop leaving a usable scroll window for the chips — at 768
+     they squeezed the strip down to 8px, which reads as "the filters are gone".
+     Give the tools their own line here and re-point the two sticky offsets,
+     which are literal sums of the bar and the (now taller) rail. */
+  #tab-ops {
+    --ob-rail: 80px;
+    --ob-stick: 130px;
+  }
+  #tab-ops .ob-rail { flex-wrap: wrap; gap: 8px 10px; }
+  #tab-ops .ob-segs { flex: 1 1 100%; }
+  #tab-ops .ob-railtools { width: 100%; flex-wrap: wrap; gap: 6px; }
+  #tab-ops .ob-search { flex: 1 1 180px; width: auto; min-width: 0; }
+  #tab-ops .ob-field { flex: 1 1 auto; min-width: 0; }
+  #tab-ops .ob-railtools .ob-select { flex: 1 1 auto; width: auto; min-width: 0; }
 }
 
 /* ~500px of tab: the summary cards stack two-up, the rail wraps, and the top
@@ -1448,105 +1559,145 @@
 #tab-ops .ob-capture .ob-row-task,
 #tab-ops .ob-capture .ob-inline { box-shadow: none; }
 
-/* ── Luxury Elysian overlay (option C) ───────────────────────────────────── */
+/* ── Aegean Editorial ──────────────────────────────────────────────────────
+   Limestone and sun-washed ivory keep the board quiet; Mediterranean blue is
+   reserved for identity, selection and progress. Editorial serif headings add
+   a cultivated guest-facing note without reducing dispatch density. */
 #tab-ops {
-  --ob-canvas: #0c1520;
-  --ob-surface: #f6f1e8;
-  --ob-navy: #0c1520;
-  --ob-navy-2: #243544;
-  --ob-ivory: #f6f1e8;
-  --ob-cream: #e8e0d0;
-  --ob-gold: #c9a84c;
-  --ob-serif: Palatino, "Palatino Linotype", "Iowan Old Style", Georgia, serif;
-  --ob-shadow: 0 12px 40px rgba(0, 0, 0, .28);
-  color: var(--ob-cream);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ob-canvas: #f2eee5;
+  --ob-surface: #fffdf8;
+  --ob-navy: #102e4a;
+  --ob-navy-2: #36566f;
+  --ob-ink: #102e4a;
+  --ob-ink-2: #65747b;
+  --ob-muted: #7d888c;
+  --ob-line: #d8d3c7;
+  --ob-line-2: #e8e3d9;
+  --ob-hair: #eee9df;
+  --ob-accent: #0e5fa7;
+  /* Legacy base rules consume the gold tokens; in this direction they carry
+     the Aegean blue accent so every existing interaction stays consistent. */
+  --ob-gold: #0e5fa7;
+  --ob-gold-tint: #dbe9f7;
+  --ob-gold-ink: #0b4d86;
+  --ob-blue: #0e5fa7;
+  --ob-r-lg: 18px;
+  --ob-r-md: 13px;
+  --ob-r-sm: 999px;
+  --ob-serif: Georgia, "Times New Roman", serif;
+  --ob-shadow: 0 2px 3px rgba(16, 46, 74, .035), 0 14px 34px rgba(16, 46, 74, .075);
+  --ob-shadow-pop: 0 16px 38px rgba(16, 46, 74, .16), 0 2px 7px rgba(16, 46, 74, .08);
+  color: var(--ob-ink);
+  font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
-#tab-ops .ob-shell { background: #0c1520; }
+#tab-ops .ob-shell { background: var(--ob-canvas); }
+#tab-ops :focus-visible { outline-color: rgba(14, 95, 167, .55); }
 #tab-ops .ob-command {
-  background: #0a121c;
-  border-bottom: 1px solid rgba(201, 168, 76, .22);
+  background: rgba(242, 238, 229, .94);
+  border-bottom-color: var(--ob-line);
 }
 #tab-ops .ob-brand {
-  color: var(--ob-gold);
+  color: var(--ob-accent);
   opacity: 1;
-  letter-spacing: .28em;
+  letter-spacing: .2em;
   font-size: 10px;
+  font-weight: 700;
 }
-#tab-ops .ob-screen-title {
-  color: var(--ob-ivory);
-  font-family: var(--ob-serif);
-  font-size: 23px;
-  font-weight: 500;
-  letter-spacing: .01em;
-}
-#tab-ops .ob-step { color: var(--ob-cream); }
-#tab-ops .ob-step:hover { background: rgba(201, 168, 76, .12); color: var(--ob-gold); }
-#tab-ops .ob-pill {
-  border-color: rgba(201, 168, 76, .28);
-  background: transparent;
-  color: var(--ob-cream);
-}
-#tab-ops .ob-pill:hover { border-color: var(--ob-gold); color: var(--ob-ivory); }
-#tab-ops .ob-pill.ob-on { border-color: var(--ob-gold); background: var(--ob-gold); color: #0c1520; }
-#tab-ops .ob-dateinput {
-  background: transparent;
-  border-color: rgba(201, 168, 76, .28);
-  color: var(--ob-cream);
-  box-shadow: none;
-}
-#tab-ops .ob-datelabel,
-#tab-ops .ob-savestate { color: rgba(232, 224, 208, .55); }
-#tab-ops .ob-savestate i { background: var(--ob-gold); }
-#tab-ops .ob-btn.ob-primary { border-color: var(--ob-gold); background: var(--ob-gold); color: #0c1520; }
-#tab-ops .ob-btn.ob-primary:hover { background: #d4b45c; border-color: #d4b45c; }
-#tab-ops .ob-card,
-#tab-ops .ob-list { background: var(--ob-ivory); color: #1c2834; box-shadow: var(--ob-shadow); }
-#tab-ops .ob-rail {
-  background: #0c1520;
-  border-bottom: 1px solid rgba(201, 168, 76, .16);
-}
-#tab-ops .ob-filter {
-  border-color: rgba(232, 224, 208, .18);
-  background: transparent;
-  color: var(--ob-cream);
-}
-#tab-ops .ob-filter:hover { border-color: rgba(201, 168, 76, .45); color: var(--ob-ivory); }
-#tab-ops .ob-filter em { color: rgba(232, 224, 208, .5); }
-#tab-ops .ob-filter.on { border-color: var(--ob-gold); background: var(--ob-gold); color: #0c1520; }
-#tab-ops .ob-filter.on em { color: #0c1520; }
-#tab-ops .ob-field label { color: rgba(232, 224, 208, .5); }
-#tab-ops .ob-rail .ob-input,
-#tab-ops .ob-rail .ob-select {
-  background: rgba(246, 241, 232, .08);
-  border-color: rgba(201, 168, 76, .28);
-  color: var(--ob-cream);
-  box-shadow: none;
-}
+#tab-ops .ob-screen-title,
 #tab-ops .ob-list-head h2,
 #tab-ops .ob-grp-line b {
+  color: var(--ob-navy);
   font-family: var(--ob-serif);
   font-weight: 500;
+  letter-spacing: -.01em;
 }
-#tab-ops .ob-progress span,
-#tab-ops .ob-striptrack i { background: var(--ob-gold); }
+#tab-ops .ob-screen-title { font-size: 24px; }
+#tab-ops .ob-step { color: var(--ob-navy-2); }
+#tab-ops .ob-step:hover { background: var(--ob-gold-tint); color: var(--ob-accent); }
+#tab-ops .ob-pill,
+#tab-ops .ob-dateinput {
+  border-color: var(--ob-line);
+  background: var(--ob-surface);
+  color: var(--ob-navy-2);
+  box-shadow: none;
+}
+#tab-ops .ob-pill:hover,
+#tab-ops .ob-dateinput:hover { border-color: #9eb9d0; }
+#tab-ops .ob-pill.ob-on {
+  border-color: var(--ob-accent);
+  background: var(--ob-accent);
+  color: #ffffff;
+}
+#tab-ops .ob-datelabel,
+#tab-ops .ob-savestate { color: var(--ob-muted); }
+#tab-ops .ob-savestate i { background: var(--ob-accent); }
+#tab-ops .ob-btn.ob-primary {
+  border-color: var(--ob-accent);
+  background: var(--ob-accent);
+  color: #ffffff;
+}
+#tab-ops .ob-btn.ob-primary:hover { border-color: #0a4f8d; background: #0a4f8d; }
+#tab-ops .ob-card,
+#tab-ops .ob-list,
 #tab-ops .ob-panel {
-  background: #132233;
-  border: 1px solid rgba(201, 168, 76, .18);
-  color: var(--ob-cream);
+  border: 1px solid rgba(216, 211, 199, .72);
+  background: var(--ob-surface);
+  color: var(--ob-ink);
   box-shadow: var(--ob-shadow);
 }
+#tab-ops .ob-card { border-radius: 18px; }
+#tab-ops .ob-rail {
+  background: var(--ob-canvas);
+  border-bottom-color: var(--ob-line);
+}
+#tab-ops .ob-filter {
+  border-color: var(--ob-line);
+  background: var(--ob-surface);
+  color: var(--ob-ink-2);
+}
+#tab-ops .ob-filter:hover { border-color: #9eb9d0; color: var(--ob-navy); }
+#tab-ops .ob-filter em { color: var(--ob-muted); }
+#tab-ops .ob-filter.on {
+  border-color: var(--ob-accent);
+  background: var(--ob-accent);
+  color: #ffffff;
+}
+#tab-ops .ob-filter.on em { color: rgba(255, 255, 255, .74); }
+#tab-ops .ob-field label { color: var(--ob-muted); }
+#tab-ops .ob-rail .ob-input,
+#tab-ops .ob-rail .ob-select {
+  border-color: var(--ob-line);
+  background-color: var(--ob-surface);
+  color: var(--ob-navy-2);
+  box-shadow: none;
+}
+#tab-ops .ob-progress span,
+#tab-ops .ob-striptrack i { background: var(--ob-accent); }
+#tab-ops .ob-grp td { background: #f7f3eb; }
+#tab-ops .ob-grp-line b { font-size: 13px; }
+#tab-ops .ob-cchip,
+#tab-ops .ob-stop { background: #e8edf2; color: var(--ob-navy-2); }
+#tab-ops .ob-assign {
+  background: rgba(14, 95, 167, .08);
+  box-shadow: inset 0 0 0 1px rgba(14, 95, 167, .22);
+  color: var(--ob-accent);
+}
+#tab-ops .ob-assign:hover {
+  background: rgba(14, 95, 167, .14);
+  box-shadow: inset 0 0 0 1px rgba(14, 95, 167, .36);
+}
+#tab-ops .ob-panel { color: var(--ob-ink); }
+#tab-ops .ob-sec { border-bottom-color: var(--ob-line-2); }
 #tab-ops .ob-sechead {
-  color: var(--ob-gold);
+  color: var(--ob-accent);
   font-family: var(--ob-serif);
   font-size: 14px;
   font-weight: 500;
 }
-#tab-ops .ob-sechead .ob-arw { color: var(--ob-gold); }
-#tab-ops .ob-prow .ob-pname { color: var(--ob-ivory); }
-#tab-ops .ob-addlink { color: var(--ob-gold); }
-#tab-ops .ob-addlink:hover { background: rgba(201, 168, 76, .12); color: #d4b45c; }
-#tab-ops .ob-subhead { color: rgba(201, 168, 76, .7); letter-spacing: .08em; text-transform: uppercase; }
-#tab-ops .ob-dispatch-table { color: #1c2834; }
-#tab-ops .ob-grp td { background: var(--ob-ivory); }
+#tab-ops .ob-sechead .ob-arw { color: var(--ob-accent); }
+#tab-ops .ob-prow .ob-pname { color: var(--ob-navy); }
+#tab-ops .ob-addlink { color: var(--ob-accent); }
+#tab-ops .ob-addlink:hover { background: var(--ob-gold-tint); color: #0a4f8d; }
+#tab-ops .ob-subhead { color: var(--ob-accent); letter-spacing: .1em; text-transform: uppercase; }
+#tab-ops .ob-dispatch-table { color: var(--ob-ink); }
 
