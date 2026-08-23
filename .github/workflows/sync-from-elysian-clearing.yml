@@ -8,12 +8,19 @@ name: Sync from elysian-clearing
 # merged, so any file touched on both sides surfaces as a normal merge conflict
 # instead of being silently discarded.
 
+# SUSPENDED at the owner's request: this job no longer runs on its own.
+# It used to run every 10 minutes and on an upstream repository_dispatch, which
+# meant automated branch pushes and pull requests under the owner's account
+# around the clock. Both automatic triggers are removed; the job now runs only
+# when someone starts it by hand.
+#
+# To resume, restore the triggers below:
+#   schedule:
+#     - cron: '*/10 * * * *'
+#   repository_dispatch:
+#     types: [elysian-clearing-updated]
 on:
-  schedule:
-    - cron: '*/10 * * * *'
   workflow_dispatch:
-  repository_dispatch:
-    types: [elysian-clearing-updated]
 
 permissions:
   contents: write

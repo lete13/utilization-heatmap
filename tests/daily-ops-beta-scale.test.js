@@ -191,23 +191,31 @@ assert(panel.innerHTML.includes('ob-nchip cool'), 'sofa / Early notes render as 
 // without pushing the remove button out of the notes cell.
 // Chips label the tag rather than echo the stored token, so PRIORITY is shown
 // in sentence case while the underlying comment string is left alone. The notes
-// column is ~138px wide and also holds the free-text field, so only the leading
-// tag is drawn and the remainder becomes a hover-titled count.
-assert(/ob-nchip hot"><span>Priority</.test(panel.innerHTML), 'the actionable flag leads and is hot/red');
+// column is ~138px wide and also holds the free-text field, so the most urgent
+// flag keeps the words and the rest stay visible as their own colours.
+assert(
+  /ob-nchip hot ob-f-priority"><span>Priority</.test(panel.innerHTML),
+  'the most urgent flag leads and carries its identity colour'
+);
 assert(!/>PRIORITY</.test(panel.innerHTML), 'no chip shouts the raw stored token');
 assert(rows[0].comments.includes('PRIORITY'), 'the stored comment token itself is untouched');
 assert(
-  /ob-nchip hot"><span>Priority<\/span><button[^>]*data-ob-flag="priority"/.test(panel.innerHTML),
+  /ob-nchip hot ob-f-priority"><span>Priority<\/span><button[^>]*data-ob-flag="priority"/.test(panel.innerHTML),
   'a flag-backed tag stays removable straight from its chip'
 );
-const moreChip = new RegExp(
-  '<span class="ob-nchip ob-nmore"><span aria-hidden="true">\\+(\\d+)</span>' +
-  '<span class="ob-sr">([^<]*)</span></span>'
-).exec(panel.innerHTML);
-assert(moreChip, 'the tags that do not fit collapse into a count');
-assert(Number(moreChip[1]) === 3, 'the count covers the three remaining tags');
+// A grey "+3" hid exactly the flags the ⋯ menu sets, so the remainder is drawn
+// as one colour marker per tag rather than a count.
+const more = /<span class="ob-nmore">(.*?)<span class="ob-sr">([^<]*)<\/span><\/span>/.exec(panel.innerHTML);
+assert(more, 'the tags without room for words still render');
+const markers = more[1].match(/<i class="ob-f-[a-z]+"/g) || [];
+assert(markers.length === 3, 'each remaining tag gets its own marker');
+assert(!/\+\d/.test(more[1]), 'the remainder is colour, not a grey count');
+assert(
+  new Set(markers).size === markers.length,
+  'the markers are distinguishable from one another rather than three identical dots'
+);
 ['Late 12:00', 'Prepare 1 sofa bed', 'Early check-in'].forEach((label) => {
-  assert(moreChip[2].includes(label), 'the count names ' + label + ' for assistive tech');
+  assert(more[2].includes(label), 'the markers name ' + label + ' for assistive tech');
 });
 
 const css = fs.readFileSync(path.join(rootDir, 'fe', 'daily-ops-beta.css'), 'utf8');
@@ -832,8 +840,46 @@ assert(
 );
 assert(/\.ob-row-note:focus \{[^}]*min-width:\s*96px/.test(css), 'the note field claims room to type on focus');
 assert(
-  /#tab-ops \.ob-nchip\.ob-nmore \{[^}]*flex:\s*none/.test(css),
-  'the overflow count never shrinks into an ellipsis itself'
+  /#tab-ops \.ob-nmore \{[^}]*flex:\s*none/.test(css),
+  'the colour markers never shrink into an ellipsis themselves'
+);
+// "A bit of colour": the five tag hues, the kind badges and the two numbers that
+// answer "what needs me today" are the whole colour budget beyond status.
+['priority', 'late', 'sofa', 'park', 'early'].forEach((flag) => {
+  assert(
+    new RegExp('#tab-ops \\.ob-nchip\\.ob-f-' + flag + ' \\{[^}]*background:\\s*#').test(css),
+    flag + ' has its own chip hue'
+  );
+  assert(
+    new RegExp('#tab-ops \\.ob-nmore i\\.ob-f-' + flag + ' \\{ background: #').test(css),
+    flag + ' has a matching marker hue'
+  );
+});
+const flagHues = (css.match(/#tab-ops \.ob-nmore i\.ob-f-[a-z]+ \{ background: (#[0-9a-f]{6})/g) || [])
+  .map((rule) => rule.slice(rule.indexOf('#')));
+assert(new Set(flagHues).size === 5, 'the five flag hues are distinct from each other');
+['maintenance', 'preparation', 'extended'].forEach((kind) => {
+  assert(
+    new RegExp('#tab-ops \\.ob-badge\\.ob-k-' + kind + ' \\{[^}]*color:\\s*#').test(css),
+    'the ' + kind + ' kind override reads as a coloured badge'
+  );
+});
+assert(
+  /#tab-ops \.ob-card-prog \.ob-ring-num \{ color: var\(--ob-accent\)/.test(css) &&
+    /#tab-ops \.ob-card-unassigned \.ob-bignum \{ color: #/.test(css) &&
+    /#tab-ops \.ob-card-arrivals \.ob-bignum \{ color: #/.test(css),
+  'the summary numbers that demand action carry a tint'
+);
+assert(/class="ob-card ob-card-unassigned"/.test(panel.innerHTML), 'the unassigned card is addressable');
+// The flag rows in the ⋯ menu have their glyphs; a kind row's gutter was empty,
+// so it now carries the marker matching the badge it produces.
+assert(
+  /'<i class="ob-mi-dot ob-k-' \+ esc\(tone\) \+ '"><\/i>'/.test(betaJs),
+  'kind rows in the row menu carry a colour marker'
+);
+assert(
+  /#tab-ops \.ob-mi-dot\.ob-k-maintenance \{ background: #/.test(css),
+  'the menu marker uses the same vocabulary as the row badge'
 );
 assert(
   /#tab-ops \.ob-sr \{[^}]*clip-path:\s*inset\(50%\)/.test(css),

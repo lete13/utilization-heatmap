@@ -1785,15 +1785,57 @@
 #tab-ops .ob-row-status.excluded { color: var(--ob-ink-2); font-weight: 400; }
 #tab-ops .ob-row-status.blocking { color: var(--ob-red); font-weight: 600; }
 
-/* Derived information is neutral. Only the leading actionable flag keeps the
-   warm exception tint; overflow is summarized by the quiet +N count. */
-#tab-ops .ob-nchip,
-#tab-ops .ob-nchip.cool,
-#tab-ops .ob-nchip.ob-nmore {
-  background: #eef0ee;
-  color: var(--ob-ink-2);
+/* Flags carry identity colour, the way a Keys Hubs chip identifies its hub.
+   Neutralising all of them left the flags the ⋯ menu sets with no visible trace
+   on the board. These five hues are the board's whole tag vocabulary, so each is
+   recognisable at a glance without becoming a rainbow. */
+#tab-ops .ob-nchip { background: #eef0ee; color: var(--ob-ink-2); }
+#tab-ops .ob-nchip.ob-f-priority { background: #fbe9e7; color: #a33327; }
+#tab-ops .ob-nchip.ob-f-late { background: #fdf0dd; color: #8a5a12; }
+#tab-ops .ob-nchip.ob-f-sofa { background: #f4ecfa; color: #6b4090; }
+#tab-ops .ob-nchip.ob-f-park { background: #eae9fb; color: #4a44a3; }
+#tab-ops .ob-nchip.ob-f-early { background: #e3eef7; color: #2f5f85; }
+#tab-ops .ob-nchip.ob-f-info { background: #eef0ee; color: var(--ob-ink-2); }
+#tab-ops .ob-nchip button { color: currentcolor; opacity: .55; }
+#tab-ops .ob-nchip button:hover { color: var(--ob-red); opacity: 1; }
+
+/* The tags with no room for words stay visible as their own colours rather than
+   collapsing into a grey count. */
+#tab-ops .ob-nmore {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  padding: 0 1px;
 }
-#tab-ops .ob-nchip.hot { background: #faefec; color: #a0524a; }
+#tab-ops .ob-nmore i { width: 7px; height: 7px; border-radius: 50%; background: #c3c7c3; }
+#tab-ops .ob-nmore i.ob-f-priority { background: #c0392b; }
+#tab-ops .ob-nmore i.ob-f-late { background: #c08a2c; }
+#tab-ops .ob-nmore i.ob-f-sofa { background: #7c4dab; }
+#tab-ops .ob-nmore i.ob-f-park { background: #5b54c4; }
+#tab-ops .ob-nmore i.ob-f-early { background: #3d78a8; }
+
+/* Kind overrides are the other thing that menu writes, so they read as coloured
+   badges rather than four shades of grey. */
+#tab-ops .ob-badge { background: #eef0ee; color: var(--ob-ink-2); font-weight: 600; }
+#tab-ops .ob-badge.ob-k-maintenance { background: #f4ecfa; color: #6b4090; }
+#tab-ops .ob-badge.ob-k-preparation { background: #e3eef7; color: #2f5f85; }
+#tab-ops .ob-badge.ob-k-extended { background: #e6f1ea; color: #2f6a4a; }
+#tab-ops .ob-badge.ob-k-owner { background: #fbe9e7; color: #a33327; }
+#tab-ops .ob-badge.ob-k-arrival { background: #e7efec; color: var(--ob-accent); }
+
+/* The kind rows in the ⋯ menu carry the same marker as the badge they produce,
+   so the menu and the board share one colour vocabulary. */
+#tab-ops .ob-mi-dot { width: 7px; height: 7px; border-radius: 50%; background: #c3c7c3; }
+#tab-ops .ob-mi-dot.ob-k-maintenance { background: #7c4dab; }
+#tab-ops .ob-mi-dot.ob-k-preparation { background: #3d78a8; }
+#tab-ops .ob-mi-dot.ob-k-extended { background: #2f6a4a; }
+
+/* A little colour on the numbers that answer "what needs me today", matching how
+   Keys Hubs tints its stat values. */
+#tab-ops .ob-card-prog .ob-ring-num { color: var(--ob-accent); }
+#tab-ops .ob-card-unassigned .ob-bignum { color: #a06b12; }
+#tab-ops .ob-card-arrivals .ob-bignum { color: #2f5f85; }
 
 /* The right panel keeps the requested docked desktop workflow but follows the
    same surface and typographic rules as the table instead of becoming a second

@@ -438,6 +438,24 @@
     return '';
   }
 
+  // Each flag earns its own hue, the way a Keys Hubs chip identifies its hub.
+  // Severity order decides which one gets the readable chip when a row carries
+  // several, and the rest still show up as their colours.
+  var PART_STYLES = [
+    { test: function (p) { return flagForPart(p) === 'priority'; }, cls: 'ob-f-priority', rank: 0 },
+    { test: function (p) { return flagForPart(p) === 'late'; }, cls: 'ob-f-late', rank: 1 },
+    { test: function (p) { return /sofa bed/i.test(p); }, cls: 'ob-f-sofa', rank: 2 },
+    { test: function (p) { return flagForPart(p) === 'park'; }, cls: 'ob-f-park', rank: 3 },
+    { test: function (p) { return flagForPart(p) === 'early'; }, cls: 'ob-f-early', rank: 4 },
+  ];
+
+  function partStyle(part) {
+    for (var i = 0; i < PART_STYLES.length; i += 1) {
+      if (PART_STYLES[i].test(part)) return PART_STYLES[i];
+    }
+    return { cls: 'ob-f-info', rank: 5 };
+  }
+
   function isManagedPart(part) {
     return !!flagForPart(part) || /sofa bed/i.test(part) || /^Long stay/i.test(part);
   }
@@ -472,16 +490,16 @@
   }
 
   // The notes column is ~138px wide and also owns the free-text field, so three
-  // chips could only ever be three ellipses ("L… Lon… P…"). One readable chip
-  // plus a count carries the same information; the ⋯ menu remains the full
-  // picture and the count names what it stands for on hover.
+  // word chips could only ever be three ellipses ("L… Lon… P…"). The most urgent
+  // flag keeps a readable chip; the rest become their own colours instead of a
+  // grey "+3", which is what made the flags the ⋯ menu sets hard to spot on the
+  // board. Every marker still names itself for assistive tech, and the menu
+  // remains the full picture.
   function noteChipsHtml(note, index, extra) {
     var parts = managedParts(note);
     if (!parts.length) return '';
-    // Most actionable first: a flag the operator can clear outranks a fact the
-    // app derived, and only the leading chip has room to stay legible.
     var ordered = parts.slice().sort(function (a, b) {
-      return (partTone(b) === ' hot' ? 1 : 0) - (partTone(a) === ' hot' ? 1 : 0);
+      return partStyle(a).rank - partStyle(b).rank;
     });
     var head = ordered[0];
     var rest = ordered.slice(1);
@@ -489,14 +507,18 @@
     var remove = flag
       ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Remove ' + esc(head) + '">×</button>'
       : '';
-    // The remainder is named for assistive tech in text rather than a title=,
-    // because Chrome paints that as a black popup that reads like a debug toast.
+    // Named in text rather than a title=, because Chrome paints that as a black
+    // popup that reads like a debug toast.
     var more = rest.length
-      ? '<span class="ob-nchip ob-nmore"><span aria-hidden="true">+' + rest.length + '</span>' +
+      ? '<span class="ob-nmore">' +
+        rest.map(function (part) {
+          return '<i class="' + partStyle(part).cls + '" aria-hidden="true"></i>';
+        }).join('') +
         '<span class="ob-sr">' + esc(rest.map(chipLabel).join(' · ')) + '</span></span>'
       : '';
     return '<div class="ob-nchips">' +
-      '<span class="ob-nchip' + partTone(head) + '"><span>' + esc(chipLabel(head)) + '</span>' + remove + '</span>' +
+      '<span class="ob-nchip' + partTone(head) + ' ' + partStyle(head).cls + '">' +
+      '<span>' + esc(chipLabel(head)) + '</span>' + remove + '</span>' +
       more +
       '</div>';
   }
@@ -711,12 +733,14 @@
     }).join('');
     // OPS_KINDS carries short word icons ("Mnt", "Prep") meant for the legacy
     // square buttons. They do not fit an 18px gutter and only repeat the label
-    // next to them, so the kind rows leave the icon track empty and rely on the
-    // tick to show state.
+    // next to them, so the gutter carries the same colour marker the row badge
+    // uses instead — the flags above have their glyphs, and a kind row with an
+    // empty gutter had no visual cue at all.
     var kindButtons = kinds.map(function (kind) {
+      var tone = String(kind.key || '').replace(/^is/, '').toLowerCase();
       return menuItemHtml(
         'data-ob-action="kind" data-ob-index="' + item.index + '" data-ob-kind="' + esc(kind.key) + '"',
-        '', sentence(kind.label || kind.key), !!row[kind.key]
+        '<i class="ob-mi-dot ob-k-' + esc(tone) + '"></i>', sentence(kind.label || kind.key), !!row[kind.key]
       );
     }).join('');
     return '<div class="ob-menu">' +
@@ -946,7 +970,7 @@
           '<div><div class="ob-ring-num">' + cleanDay.done + ' / ' + cleanDay.total + '</div><div class="ob-ring-sub">' + pct + '% cleaned</div></div>' +
         '</div>' +
       '</div>' +
-      '<div class="ob-card">' +
+      '<div class="ob-card ob-card-unassigned">' +
         '<div class="ob-card-label">Unassigned</div>' +
         '<div class="ob-bignum">' + summary.unassigned + '</div>' +
         '<div class="ob-card-foot"><i style="background:#c08a2c"></i>need a cleaner</div>' +
