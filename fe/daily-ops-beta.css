@@ -1949,3 +1949,18 @@
 }
 /* chips no longer compete for one line, so let each show its full label */
 #tab-ops .ob-nchips-all .ob-nchip { flex: none; max-width: 100%; }
+
+/* ── Accent: dark navy to match the sidebar ────────────────────────────────
+   The board's accent was a muted green (#315f53), which read as a third
+   colour next to the navy shell. Aligning it with the sidebar keeps
+   "selected / current" reading as one idea across the whole app. Green is
+   now reserved for a single meaning: work that is finished. */
+#tab-ops {
+  --ob-accent: #0f1e2e;
+  --ob-gold: #0f1e2e;
+  --ob-gold-ink: #0f1e2e;
+  --ob-gold-tint: #e8ecf1;
+}
+/* hover/pressed states a step lighter so the press is still felt */
+#tab-ops .ob-filter.on:hover { background: #1b2f45; border-color: #1b2f45; }
+#tab-ops .ob-btn.ob-primary:hover { background: #1b2f45; border-color: #1b2f45; }
