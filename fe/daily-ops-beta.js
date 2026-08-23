@@ -478,40 +478,27 @@
   function noteChipsHtml(note, index, extra) {
     var parts = managedParts(note);
     if (!parts.length) return '';
-    // Show EVERY active flag: an operator scanning the board should see the
-    // whole picture for a row without hovering or opening the ⋯ menu.
-    // Most actionable first, so the flags they can clear lead the line.
+    // Most actionable first: a flag the operator can clear outranks a fact the
+    // app derived, and only the leading chip has room to stay legible.
     var ordered = parts.slice().sort(function (a, b) {
       return (partTone(b) === ' hot' ? 1 : 0) - (partTone(a) === ' hot' ? 1 : 0);
     });
-    var chips = ordered.map(function (part) {
-      var flag = extra ? '' : flagForPart(part);
-      // a stable per-flag class so each tag can carry its own colour
-      var kind = flagForPart(part) || (/sofa bed/i.test(part) ? 'sofa' : (/^Long stay/i.test(part) ? 'longstay' : ''));
-      var kindCls = kind ? ' ob-t-' + kind : '';
-      // The notes column is narrow, but the row height must stay fixed and no
-      // tag may be cut off. Known flags therefore render as icon + a short
-      // word: the glyph and colour carry the meaning at a glance, the short
-      // label makes it readable without hovering. Full wording stays for
-      // assistive tech.
-      var ICONS = { late: '\u23F0', priority: '\u2757', park: '\uD83D\uDC76', early: '\u2600\uFE0F' };
-      var SHORT = { priority: 'Priority', park: 'Park bed', early: 'Early' };
-      var label = chipLabel(part);
-      var icon = ICONS[kind] || '';
-      // "Late Checkout: 12:00" already reads as "Late 12:00" — keep the time.
-      var shortLabel = SHORT[kind] || label;
-      var body = icon
-        ? '<span class="ob-nico" aria-hidden="true">' + icon + '</span>' +
-          '<span class="ob-nlabel">' + esc(shortLabel) + '</span>' +
-          '<span class="ob-sr">' + esc(label) + '</span>'
-        : '<span>' + esc(label) + '</span>';
-      var compact = icon ? ' ob-nchip-ico' : '';
-      var remove = flag
-        ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Remove ' + esc(part) + '">×</button>'
-        : '';
-      return '<span class="ob-nchip' + partTone(part) + kindCls + compact + '">' + body + remove + '</span>';
-    }).join('');
-    return '<div class="ob-nchips ob-nchips-all">' + chips + '</div>';
+    var head = ordered[0];
+    var rest = ordered.slice(1);
+    var flag = extra ? '' : flagForPart(head);
+    var remove = flag
+      ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Remove ' + esc(head) + '">×</button>'
+      : '';
+    // The remainder is named for assistive tech in text rather than a title=,
+    // because Chrome paints that as a black popup that reads like a debug toast.
+    var more = rest.length
+      ? '<span class="ob-nchip ob-nmore"><span aria-hidden="true">+' + rest.length + '</span>' +
+        '<span class="ob-sr">' + esc(rest.map(chipLabel).join(' · ')) + '</span></span>'
+      : '';
+    return '<div class="ob-nchips">' +
+      '<span class="ob-nchip' + partTone(head) + '"><span>' + esc(chipLabel(head)) + '</span>' + remove + '</span>' +
+      more +
+      '</div>';
   }
 
   // ── row pieces ───────────────────────────────────────────────────────────
@@ -630,6 +617,7 @@
     // its own rail segment; reserve the blocking word for the other causes so
     // the status column keeps discriminating. The Blocking filter is unchanged.
     if (target && !cleaners(target).length) return { cls: 'unassigned', word: 'Unassigned' };
+    if (itemBlocking(item)) return { cls: 'blocking', word: 'Blocking' };
     return { cls: 'ready', word: 'Ready' };
   }
 
@@ -852,6 +840,7 @@
   // flag vocabulary the ⋯ menu writes into the notes column.
   function legendHtml() {
     return '<div class="ob-tone-legend" aria-label="Board colour key">' +
+      '<span class="ob-tone-lg"><i class="tone-hot"></i>Blocking</span>' +
       '<span class="ob-tone-lg"><i class="tone-warn"></i>Unassigned / check-in unknown</span>' +
       '<span class="ob-tone-lg"><i class="tone-done"></i>Done</span>' +
       '<span class="ob-tone-lg"><i class="tone-open"></i>Neutral — nothing to flag</span>' +
@@ -1204,6 +1193,7 @@
   function railHtml(allItems, summary, cleanDay) {
     var segs = [
       ['all', 'All', allItems.length, ''],
+      ['attention', 'Blocking', summary.decisions, 'ob-d-hot'],
       ['unknown', 'Unknown check-in', summary.unknown, 'ob-d-warn'],
       ['open', 'Open', summary.open, 'ob-d-cool'],
       ['unassigned', 'Unassigned', summary.unassigned, 'ob-d-warn'],
