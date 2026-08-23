@@ -13,13 +13,13 @@ Within this sandbox repo, working on a feature branch (e.g. `cursor/my-change-5c
 - **Develop here** → feature branch → PR → merge into heatmap `main`
 - **Promote to production** → the owner ports the diff to `elysian-clearing`; agents do not push there
 
-### Auto-sync from `elysian-clearing` main
+### Sync from `elysian-clearing` main — SUSPENDED (manual only)
 
-Upstream changes arrive as a **reviewable pull request**, never as a force-push. `.github/workflows/sync-from-elysian-clearing.yml`:
+**No automation runs on its own in this repo.** The sync job used to run every 10 minutes (and on an upstream `repository_dispatch`), which meant continuous automated branch pushes and pull requests under the owner's account. Both automatic triggers were removed at the owner's request; do not restore them without being asked.
 
-- **Every 10 minutes** — if [`lete13/elysian-clearing`](https://github.com/lete13/elysian-clearing) `main` is not already contained in this repo's `main`, it force-updates the `sync/elysian-clearing` branch to upstream `main` and opens (or refreshes) a PR into `main`
-- **Manual** — Actions → “Sync from elysian-clearing” → Run workflow
-- **Instant (optional)** — add `docs/elysian-clearing-sync-trigger.yml.example` to `elysian-clearing` with a `HEATMAP_SYNC_TOKEN` secret
+`.github/workflows/sync-from-elysian-clearing.yml` now runs **only** when started by hand: Actions → “Sync from elysian-clearing” → Run workflow. The file documents the exact triggers to restore if the owner ever wants the schedule back.
+
+When it does run, upstream changes arrive as a **reviewable pull request**, never as a force-push: it force-updates the `sync/elysian-clearing` branch to upstream `main` and opens a PR into `main`.
 
 The job **never writes to `main`**, so work already on `main` is not overwritten by a sync. Merge the sync PR when you want upstream changes; a file changed both upstream and here (e.g. `fe/daily-ops-beta.js`) surfaces as a normal merge conflict instead of being silently discarded.
 
