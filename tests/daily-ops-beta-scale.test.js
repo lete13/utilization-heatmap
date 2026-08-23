@@ -682,13 +682,12 @@ assert(/\.ob-inline:focus \{[^}]*box-shadow:\s*inset/.test(css), 'inline fields 
 assert(!/ob-row-eta ob-empty"/.test(panel.innerHTML), 'the blank-ETA modifier does not reuse the empty-state class');
 assert(/\.ob-row-eta\.ob-eta-empty/.test(css), 'the blank-ETA modifier has its own class');
 
-// Assign is the primary row action: one uniform navy-tinted pill with a
-// hairline — never dashed, never the gold accent.
+// Assign is the primary row action: one uniform tinted pill with a hairline —
+// never dashed and never confused with the solid active-selection treatment.
 const assignCss = (css.match(/#tab-ops \.ob-assign \{[^}]*\}/) || [''])[0];
 assert(/border-radius:\s*999px/.test(assignCss), 'the assign control is a pill');
 assert(/box-shadow:\s*inset 0 0 0 1px rgba\(22, 40, 58/.test(assignCss), 'the pill carries a navy hairline');
 assert(!/dashed/.test(assignCss), 'the assign pill is not dashed');
-assert(!/gold|#c9a227|--ob-gold/.test(assignCss), 'gold is not spent on the assign pill');
 
 // Status is always a coloured dot AND a word, and it discriminates: a row with
 // no crew reads "Unassigned" rather than being swallowed by "Blocking".
@@ -705,10 +704,21 @@ assert(
   'blocking rows earn an inset left edge instead'
 );
 
-// Champagne gold means exactly one thing: the active selection.
-const goldUses = (css.match(/var\(--ob-gold[^)]*\)/g) || []).length;
-assert(goldUses > 0, 'the gold token is used');
-assert(/\.ob-filter\.on[^{]*\{[^}]*var\(--ob-gold/.test(css), 'the active filter chip is the gold one');
+// Aegean Editorial is a full visual system, not a colour-only swap: limestone
+// canvas, ivory surfaces, Mediterranean blue selection, editorial serif
+// hierarchy and softer geometry all arrive together.
+const aegean = css.slice(css.indexOf('/* ── Aegean Editorial'));
+assert(aegean.length > 1000, 'the Aegean Editorial overlay is present');
+assert(/--ob-canvas:\s*#f2eee5/.test(aegean), 'the canvas is limestone');
+assert(/--ob-surface:\s*#fffdf8/.test(aegean), 'surfaces are sun-washed ivory');
+assert(/--ob-accent:\s*#0e5fa7/.test(aegean), 'Mediterranean blue owns the accent');
+assert(/--ob-serif:\s*Georgia/.test(aegean), 'editorial headings use a serif voice');
+assert(/--ob-r-lg:\s*18px/.test(aegean), 'cards use the softer Aegean geometry');
+assert(
+  /\.ob-filter\.on\s*\{[^}]*background:\s*var\(--ob-accent\)[^}]*color:\s*#ffffff/.test(aegean),
+  'the active filter is a solid Mediterranean-blue selection'
+);
+assert(/stroke="#0e5fa7"/.test(betaJs), 'the progress ring carries the Aegean accent');
 
 // Card mode: a cell that would hold nothing but an em-dash is dropped rather
 // than becoming its own empty band.
