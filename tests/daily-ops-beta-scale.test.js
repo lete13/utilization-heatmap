@@ -719,12 +719,12 @@ assert(/\.ob-inline:focus \{[^}]*box-shadow:\s*inset/.test(css), 'inline fields 
 assert(!/ob-row-eta ob-empty"/.test(panel.innerHTML), 'the blank-ETA modifier does not reuse the empty-state class');
 assert(/\.ob-row-eta\.ob-eta-empty/.test(css), 'the blank-ETA modifier has its own class');
 
-// Assign is the primary row action: one uniform tinted pill with a hairline —
-// never dashed and never confused with the solid active-selection treatment.
+// The base component keeps its stable geometry. The final Keys Hubs-inspired
+// layer turns only the empty assignment into a dashed off-state; the compact ＋
+// beside an assigned cleaner remains solid.
 const assignCss = (css.match(/#tab-ops \.ob-assign \{[^}]*\}/) || [''])[0];
 assert(/border-radius:\s*999px/.test(assignCss), 'the assign control is a pill');
 assert(/box-shadow:\s*inset 0 0 0 1px rgba\(22, 40, 58/.test(assignCss), 'the pill carries a navy hairline');
-assert(!/dashed/.test(assignCss), 'the assign pill is not dashed');
 
 // Status is always a coloured dot AND a word, and it discriminates: a row with
 // no crew reads "Unassigned" rather than being swallowed by "Blocking".
@@ -741,21 +741,51 @@ assert(
   'blocking rows earn an inset left edge instead'
 );
 
-// Aegean Editorial is a full visual system, not a colour-only swap: limestone
-// canvas, ivory surfaces, Mediterranean blue selection, editorial serif
-// hierarchy and softer geometry all arrive together.
-const aegean = css.slice(css.indexOf('/* ── Aegean Editorial'));
-assert(aegean.length > 1000, 'the Aegean Editorial overlay is present');
-assert(/--ob-canvas:\s*#f2eee5/.test(aegean), 'the canvas is limestone');
-assert(/--ob-surface:\s*#fffdf8/.test(aegean), 'surfaces are sun-washed ivory');
-assert(/--ob-accent:\s*#0e5fa7/.test(aegean), 'Mediterranean blue owns the accent');
-assert(/--ob-serif:\s*Georgia/.test(aegean), 'editorial headings use a serif voice');
-assert(/--ob-r-lg:\s*18px/.test(aegean), 'cards use the softer Aegean geometry');
+// Keys Hubs is the visual reference: neutral page, white surfaces, one
+// sans-serif voice, one quiet elevation language and colour primarily for
+// selection or an exception. The nine-column dispatch workflow remains intact.
+const calm = css.slice(css.indexOf('/* ── Keys Hubs calm'));
+assert(calm.length > 3000, 'the Keys Hubs-inspired presentation layer is present');
+assert(!css.includes('/* ── Aegean Editorial'), 'the decorative Aegean layer is removed rather than stacked underneath');
+assert(/--ob-canvas:\s*#f5f5f2/.test(calm), 'the page uses the Keys Hubs neutral canvas');
+assert(/--ob-surface:\s*#ffffff/.test(calm), 'the board uses one white primary surface');
+assert(/--ob-accent:\s*#315f53/.test(calm), 'the restrained green accent owns selection');
+assert(/--ob-r-lg:\s*14px/.test(calm), 'surface geometry matches Keys Hubs');
 assert(
-  /\.ob-filter\.on\s*\{[^}]*background:\s*var\(--ob-accent\)[^}]*color:\s*#ffffff/.test(aegean),
-  'the active filter is a solid Mediterranean-blue selection'
+  /--ob-shadow:\s*0 1px 2px rgba\(60, 50, 30, \.05\), 0 4px 18px rgba\(60, 50, 30, \.06\)/.test(calm),
+  'cards, board and panel share the Keys Hubs shadow'
 );
-assert(/stroke="#0e5fa7"/.test(betaJs), 'the progress ring carries the Aegean accent');
+assert(/\.ob-brand \{ display:\s*none/.test(calm), 'the app sidebar makes the repeated in-tab wordmark unnecessary');
+assert(
+  /\.ob-screen-title,[\s\S]*?font-family:\s*inherit/.test(calm) && !/Georgia/.test(calm),
+  'screen, list, group and panel headings use one sans-serif voice'
+);
+assert(
+  /\.ob-dispatch-table th \{[^}]*background:\s*#f5f5f2[^}]*font-weight:\s*600[^}]*text-transform:\s*uppercase/.test(calm),
+  'the table header is the calm Keys Hubs band'
+);
+assert(
+  /\.ob-filter\.on\s*\{[^}]*background:\s*var\(--ob-accent\)[^}]*color:\s*#ffffff/.test(calm),
+  'only the active filter becomes a solid accent object'
+);
+assert(
+  /\.ob-assign:not\(\.ob-plus\) \{[^}]*border:\s*1px dashed[^}]*background:\s*transparent/.test(calm),
+  'an empty assignment adopts the quiet Keys Hubs off-state'
+);
+assert(
+  /\.ob-assign\.ob-plus \{[^}]*background:\s*transparent[^}]*box-shadow:\s*inset/.test(calm),
+  'the assigned-row plus stays a compact add affordance rather than a dashed missing state'
+);
+assert(
+  /\.ob-row-status,[\s\S]*?\.ob-row-status\.excluded \{[^}]*color:\s*var\(--ob-ink-2\)/.test(calm),
+  'status words are neutral so their dots carry the scan'
+);
+assert(
+  /\.ob-row-status\.blocking \{[^}]*color:\s*var\(--ob-red\)/.test(calm),
+  'blocking remains the one status with red text emphasis'
+);
+assert(/stroke="#315f53"/.test(betaJs), 'the progress ring carries the restrained accent');
+assert(/backgroundColor:\s*'#f5f5f2'/.test(betaJs), 'image export uses the same neutral canvas');
 
 // Presentation refinements: empty slots stop rendering as broken data, repeated
 // chrome recedes until the row is worked, and the area head closes with a rule

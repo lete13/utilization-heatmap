@@ -1559,70 +1559,71 @@
 #tab-ops .ob-capture .ob-row-task,
 #tab-ops .ob-capture .ob-inline { box-shadow: none; }
 
-/* ── Aegean Editorial ──────────────────────────────────────────────────────
-   Limestone and sun-washed ivory keep the board quiet; Mediterranean blue is
-   reserved for identity, selection and progress. Editorial serif headings add
-   a cultivated guest-facing note without reducing dispatch density. */
+/* ── Keys Hubs calm ────────────────────────────────────────────────────────
+   Daily Ops has more state and more actions than Keys Hubs, but it does not
+   need more decoration. This layer borrows the visual rules of that tab:
+   one sans-serif voice, one quiet surface shadow, one neutral header band and
+   colour primarily for selection or an exception. Operational density and all
+   nine dispatch columns remain unchanged. */
 #tab-ops {
-  --ob-canvas: #f2eee5;
-  --ob-surface: #fffdf8;
-  --ob-navy: #102e4a;
-  --ob-navy-2: #36566f;
-  --ob-ink: #102e4a;
-  --ob-ink-2: #65747b;
-  --ob-muted: #7d888c;
-  --ob-line: #d8d3c7;
-  --ob-line-2: #e8e3d9;
-  --ob-hair: #eee9df;
-  --ob-accent: #0e5fa7;
-  /* Legacy base rules consume the gold tokens; in this direction they carry
-     the Aegean blue accent so every existing interaction stays consistent. */
-  --ob-gold: #0e5fa7;
-  --ob-gold-tint: #dbe9f7;
-  --ob-gold-ink: #0b4d86;
-  --ob-blue: #0e5fa7;
-  --ob-r-lg: 18px;
-  --ob-r-md: 13px;
-  --ob-r-sm: 999px;
-  --ob-serif: Georgia, "Times New Roman", serif;
-  --ob-shadow: 0 2px 3px rgba(16, 46, 74, .035), 0 14px 34px rgba(16, 46, 74, .075);
-  --ob-shadow-pop: 0 16px 38px rgba(16, 46, 74, .16), 0 2px 7px rgba(16, 46, 74, .08);
+  --ob-canvas: #f5f5f2;
+  --ob-surface: #ffffff;
+  --ob-navy: #292d2d;
+  --ob-navy-2: #4d5554;
+  --ob-ink: #292d2d;
+  --ob-ink-2: #626967;
+  --ob-muted: #888b87;
+  --ob-line: rgba(0, 0, 0, .10);
+  --ob-line-2: rgba(0, 0, 0, .06);
+  --ob-hair: rgba(0, 0, 0, .05);
+  --ob-accent: #315f53;
+  --ob-gold: #315f53;
+  --ob-gold-tint: #e7efec;
+  --ob-gold-ink: #315f53;
+  --ob-blue: #4f6f85;
+  --ob-r-lg: 14px;
+  --ob-r-md: 10px;
+  --ob-r-sm: 8px;
+  --ob-serif: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  --ob-shadow: 0 1px 2px rgba(60, 50, 30, .05), 0 4px 18px rgba(60, 50, 30, .06);
+  --ob-shadow-pop: 0 10px 28px rgba(25, 30, 29, .16), 0 2px 6px rgba(25, 30, 29, .08);
   color: var(--ob-ink);
-  font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
 }
+
 #tab-ops .ob-shell { background: var(--ob-canvas); }
-#tab-ops :focus-visible { outline-color: rgba(14, 95, 167, .55); }
+#tab-ops :focus-visible { outline-color: rgba(49, 95, 83, .55); }
+
+/* The app sidebar already carries the Elysian identity. Repeating the wordmark
+   inside the work surface creates a second header before the actual title. */
+#tab-ops .ob-brand { display: none; }
 #tab-ops .ob-command {
-  background: rgba(242, 238, 229, .94);
-  border-bottom-color: var(--ob-line);
-}
-#tab-ops .ob-brand {
-  color: var(--ob-accent);
-  opacity: 1;
-  letter-spacing: .2em;
-  font-size: 10px;
-  font-weight: 700;
+  gap: 12px;
+  border-bottom-color: var(--ob-line-2);
+  background: rgba(245, 245, 242, .96);
 }
 #tab-ops .ob-screen-title,
 #tab-ops .ob-list-head h2,
-#tab-ops .ob-grp-line b {
-  color: var(--ob-navy);
-  font-family: var(--ob-serif);
-  font-weight: 500;
+#tab-ops .ob-grp-line b,
+#tab-ops .ob-sechead {
+  color: var(--ob-ink);
+  font-family: inherit;
   letter-spacing: -.01em;
 }
-#tab-ops .ob-screen-title { font-size: 24px; }
-#tab-ops .ob-step { color: var(--ob-navy-2); }
-#tab-ops .ob-step:hover { background: var(--ob-gold-tint); color: var(--ob-accent); }
+#tab-ops .ob-screen-title { font-size: 20px; font-weight: 700; }
+#tab-ops .ob-list-head h2 { font-size: 15px; font-weight: 700; }
+#tab-ops .ob-step { color: var(--ob-ink-2); }
+#tab-ops .ob-step:hover { background: rgba(0, 0, 0, .05); color: var(--ob-ink); }
 #tab-ops .ob-pill,
 #tab-ops .ob-dateinput {
   border-color: var(--ob-line);
+  border-radius: 8px;
   background: var(--ob-surface);
-  color: var(--ob-navy-2);
   box-shadow: none;
+  color: var(--ob-ink-2);
 }
 #tab-ops .ob-pill:hover,
-#tab-ops .ob-dateinput:hover { border-color: #9eb9d0; }
+#tab-ops .ob-dateinput:hover { border-color: rgba(0, 0, 0, .22); }
 #tab-ops .ob-pill.ob-on {
   border-color: var(--ob-accent);
   background: var(--ob-accent);
@@ -1631,73 +1632,190 @@
 #tab-ops .ob-datelabel,
 #tab-ops .ob-savestate { color: var(--ob-muted); }
 #tab-ops .ob-savestate i { background: var(--ob-accent); }
-#tab-ops .ob-btn.ob-primary {
-  border-color: var(--ob-accent);
-  background: var(--ob-accent);
-  color: #ffffff;
-}
-#tab-ops .ob-btn.ob-primary:hover { border-color: #0a4f8d; background: #0a4f8d; }
+
+/* Keys Hubs has one restrained elevation language. Cards, list and panel share
+   it; menus retain --ob-shadow-pop so overlays still separate from the page. */
 #tab-ops .ob-card,
 #tab-ops .ob-list,
 #tab-ops .ob-panel {
-  border: 1px solid rgba(216, 211, 199, .72);
+  border: 0;
+  border-radius: var(--ob-r-lg);
   background: var(--ob-surface);
-  color: var(--ob-ink);
   box-shadow: var(--ob-shadow);
+  color: var(--ob-ink);
 }
-#tab-ops .ob-card { border-radius: 18px; }
+#tab-ops .ob-cards { gap: 12px; margin: 12px 0 8px; }
+#tab-ops .ob-card { padding: 12px 14px; }
+#tab-ops .ob-card-label {
+  color: var(--ob-ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+#tab-ops .ob-bignum,
+#tab-ops .ob-ring-num { color: var(--ob-ink); font-weight: 700; }
+#tab-ops .ob-bignum { font-size: 24px; }
+#tab-ops .ob-ring-num { font-size: 22px; }
+#tab-ops .ob-card-foot,
+#tab-ops .ob-ring-sub { color: var(--ob-muted); }
+
+/* The filter rail is a toolbar, not a second card deck. Off controls are quiet;
+   only the selected filter becomes a solid object. */
 #tab-ops .ob-rail {
+  gap: 10px;
+  border-bottom-color: var(--ob-line-2);
   background: var(--ob-canvas);
-  border-bottom-color: var(--ob-line);
+}
+#tab-ops .ob-segs {
+  background:
+    linear-gradient(90deg, #f5f5f2 40%, rgba(245, 245, 242, 0)) 0 0 / 24px 100% no-repeat local,
+    linear-gradient(90deg, rgba(245, 245, 242, 0), #f5f5f2 60%) 100% 0 / 24px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, .12), rgba(0, 0, 0, 0)) 0 0 / 12px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, .12), rgba(0, 0, 0, 0)) 100% 0 / 12px 100% no-repeat scroll;
 }
 #tab-ops .ob-filter {
-  border-color: var(--ob-line);
-  background: var(--ob-surface);
+  border-color: rgba(0, 0, 0, .16);
+  background: transparent;
   color: var(--ob-ink-2);
+  font-weight: 500;
 }
-#tab-ops .ob-filter:hover { border-color: #9eb9d0; color: var(--ob-navy); }
+#tab-ops .ob-filter:hover { border-color: rgba(0, 0, 0, .3); color: var(--ob-ink); }
 #tab-ops .ob-filter em { color: var(--ob-muted); }
 #tab-ops .ob-filter.on {
   border-color: var(--ob-accent);
   background: var(--ob-accent);
   color: #ffffff;
 }
-#tab-ops .ob-filter.on em { color: rgba(255, 255, 255, .74); }
+#tab-ops .ob-filter.on em { color: rgba(255, 255, 255, .72); }
 #tab-ops .ob-field label { color: var(--ob-muted); }
 #tab-ops .ob-rail .ob-input,
 #tab-ops .ob-rail .ob-select {
   border-color: var(--ob-line);
+  border-radius: 8px;
   background-color: var(--ob-surface);
-  color: var(--ob-navy-2);
   box-shadow: none;
+  color: var(--ob-ink);
 }
+#tab-ops .ob-rail .ob-input::placeholder { color: #a4a7a3; }
 #tab-ops .ob-progress span,
 #tab-ops .ob-striptrack i { background: var(--ob-accent); }
-#tab-ops .ob-grp td { background: #f7f3eb; }
-#tab-ops .ob-grp-line b { font-size: 13px; }
+
+/* Match the Keys Hubs table: a calm uppercase header band and one consistent
+   divider. Height stays 26px because sticky group geometry is keyed to it. */
+#tab-ops .ob-dispatch-table { color: var(--ob-ink); font-size: 12.5px; }
+#tab-ops .ob-dispatch-table th {
+  border-bottom-color: var(--ob-line-2);
+  background: #f5f5f2;
+  color: var(--ob-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+#tab-ops .ob-dispatch-row td { border-bottom-color: var(--ob-hair); }
+#tab-ops .ob-dispatch-row:hover td { background: #f7f7f4; }
+#tab-ops .ob-dispatch-row.tone-done td,
+#tab-ops .ob-dispatch-row.tone-hot td,
+#tab-ops .ob-dispatch-row.tone-warn td,
+#tab-ops .ob-dispatch-row.tone-same td,
+#tab-ops .ob-dispatch-row.tone-open td { background: transparent; }
+#tab-ops .ob-dispatch-row.tone-done:hover td,
+#tab-ops .ob-dispatch-row.tone-hot:hover td,
+#tab-ops .ob-dispatch-row.tone-warn:hover td,
+#tab-ops .ob-dispatch-row.tone-same:hover td,
+#tab-ops .ob-dispatch-row.tone-open:hover td { background: #f7f7f4; }
+
+/* Grouping remains sticky, so the band must stay opaque while rows pass under
+   it. Sans typography and a hairline are enough hierarchy. */
+#tab-ops .ob-grp td { background: #f5f5f2; }
+#tab-ops .ob-grp-line b {
+  color: var(--ob-ink);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+#tab-ops .ob-grp-line em { color: var(--ob-muted); }
+#tab-ops .ob-gclean { background: rgba(0, 0, 0, .05); color: var(--ob-ink-2); }
+#tab-ops .ob-grp-line::after { background: var(--ob-line-2); }
+
+/* Secondary facts remain available but do not compete with the lead line. */
+#tab-ops .ob-sub,
+#tab-ops .ob-det-sub { color: #a1a5a1; }
+#tab-ops .ob-det-lead { color: var(--ob-ink-2); }
+#tab-ops .ob-ci.ob-yes { color: var(--ob-ink); }
+#tab-ops .ob-ci.ob-unknown { color: var(--ob-muted); }
+
+/* One neutral control family. An empty assignment is the Keys Hubs off-state:
+   transparent, dashed and grey. The compact ＋ beside an assigned name is not
+   dashed, because it is an add affordance rather than a missing state. */
 #tab-ops .ob-cchip,
-#tab-ops .ob-stop { background: #e8edf2; color: var(--ob-navy-2); }
-#tab-ops .ob-assign {
-  background: rgba(14, 95, 167, .08);
-  box-shadow: inset 0 0 0 1px rgba(14, 95, 167, .22);
-  color: var(--ob-accent);
+#tab-ops .ob-stop {
+  background: #eef0ee;
+  color: var(--ob-ink-2);
 }
-#tab-ops .ob-assign:hover {
-  background: rgba(14, 95, 167, .14);
-  box-shadow: inset 0 0 0 1px rgba(14, 95, 167, .36);
+#tab-ops .ob-assign:not(.ob-plus) {
+  border: 1px dashed rgba(0, 0, 0, .24);
+  background: transparent;
+  box-shadow: none;
+  color: var(--ob-muted);
 }
+#tab-ops .ob-assign:not(.ob-plus):hover {
+  border-color: rgba(0, 0, 0, .36);
+  border-style: solid;
+  background: #f5f5f2;
+  box-shadow: none;
+  color: var(--ob-ink-2);
+}
+#tab-ops .ob-assign.ob-plus {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .14);
+  color: var(--ob-muted);
+}
+#tab-ops .ob-rowmenu-btn { opacity: 0; }
+#tab-ops .ob-dispatch-row:hover .ob-rowmenu-btn,
+#tab-ops .ob-rowmenu-btn.ob-on,
+#tab-ops .ob-rowmenu-btn:focus-visible { opacity: 1; }
+
+/* Status words stay neutral; the dot does the quick scanning. Blocking is the
+   one status whose text keeps red because it requires action now. */
+#tab-ops .ob-row-status,
+#tab-ops .ob-row-status.done,
+#tab-ops .ob-row-status.unassigned,
+#tab-ops .ob-row-status.ready,
+#tab-ops .ob-row-status.excluded { color: var(--ob-ink-2); font-weight: 400; }
+#tab-ops .ob-row-status.blocking { color: var(--ob-red); font-weight: 600; }
+
+/* Derived information is neutral. Only the leading actionable flag keeps the
+   warm exception tint; overflow is summarized by the quiet +N count. */
+#tab-ops .ob-nchip,
+#tab-ops .ob-nchip.cool,
+#tab-ops .ob-nchip.ob-nmore {
+  background: #eef0ee;
+  color: var(--ob-ink-2);
+}
+#tab-ops .ob-nchip.hot { background: #faefec; color: #a0524a; }
+
+/* The right panel keeps the requested docked desktop workflow but follows the
+   same surface and typographic rules as the table instead of becoming a second
+   decorative theme. */
 #tab-ops .ob-panel { color: var(--ob-ink); }
 #tab-ops .ob-sec { border-bottom-color: var(--ob-line-2); }
 #tab-ops .ob-sechead {
-  color: var(--ob-accent);
-  font-family: var(--ob-serif);
-  font-size: 14px;
-  font-weight: 500;
+  color: var(--ob-ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
 }
-#tab-ops .ob-sechead .ob-arw { color: var(--ob-accent); }
-#tab-ops .ob-prow .ob-pname { color: var(--ob-navy); }
+#tab-ops .ob-sechead .ob-arw { color: var(--ob-muted); }
+#tab-ops .ob-prow .ob-pname { color: var(--ob-ink); }
 #tab-ops .ob-addlink { color: var(--ob-accent); }
-#tab-ops .ob-addlink:hover { background: var(--ob-gold-tint); color: #0a4f8d; }
-#tab-ops .ob-subhead { color: var(--ob-accent); letter-spacing: .1em; text-transform: uppercase; }
-#tab-ops .ob-dispatch-table { color: var(--ob-ink); }
+#tab-ops .ob-addlink:hover { background: var(--ob-gold-tint); color: #24483f; }
+#tab-ops .ob-subhead { color: var(--ob-muted); letter-spacing: .06em; text-transform: uppercase; }
+
+@media (max-width: 760px) {
+  /* Card-mode rows and the overlay panel should not inherit desktop elevation. */
+  #tab-ops .ob-list { background: transparent; box-shadow: none; }
+  #tab-ops .ob-dispatch-row { background: var(--ob-surface); box-shadow: var(--ob-shadow); }
+}
 

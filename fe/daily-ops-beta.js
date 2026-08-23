@@ -919,7 +919,7 @@
     var off = circ * (1 - (pct / 100));
     return '<svg class="ob-ring" viewBox="0 0 64 64" aria-hidden="true">' +
       '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="#e4dccf" stroke-width="4"></circle>' +
-      '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="#0e5fa7" stroke-width="4" stroke-linecap="round" ' +
+      '<circle cx="32" cy="32" r="' + r + '" fill="none" stroke="#315f53" stroke-width="4" stroke-linecap="round" ' +
         'stroke-dasharray="' + circ.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '" transform="rotate(-90 32 32)"></circle>' +
       '</svg>';
   }
@@ -1771,7 +1771,7 @@
       try {
         canvas = await capture(el, {
           scale: 2,
-          backgroundColor: '#faf9f7',
+          backgroundColor: '#f5f5f2',
           useCORS: true,
           logging: false,
           onclone: function (clonedDoc) { flattenCloneColors(clonedDoc); },
