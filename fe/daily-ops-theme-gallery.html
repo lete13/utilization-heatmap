@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Daily Ops · Theme gallery</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;min-height:100%}button,input,select{font:inherit;color:inherit}
+:root{
+  --bg:#eef2f3;--surface:#fff;--surface2:#f7f9f9;--ink:#17252a;--muted:#66777c;--line:#dbe3e4;
+  --accent:#087e8b;--accent2:#d9f1f2;--good:#238462;--warn:#d27636;--bad:#c74b4b;
+  --title:"Arial Narrow","Inter Tight",Arial,sans-serif;--body:Inter,Arial,sans-serif;
+  --radius:3px;--card-radius:8px;--shadow:0 10px 28px rgba(18,44,49,.07);--row:34px;--track:.02em;
+}
+body{background:var(--bg);color:var(--ink);font:13px/1.4 var(--body);transition:background .25s,color .25s}
+body[data-theme="aegean"]{
+  --bg:#f2eee5;--surface:#fffdf8;--surface2:#e8edf2;--ink:#102e4a;--muted:#6c777d;--line:#d8d3c7;
+  --accent:#0e5fa7;--accent2:#dbe9f7;--good:#377d63;--warn:#c97835;--bad:#b74b45;
+  --title:Georgia,"Times New Roman",serif;--body:"Avenir Next",Avenir,Arial,sans-serif;
+  --radius:999px;--card-radius:18px;--shadow:0 14px 34px rgba(16,46,74,.08);--row:38px;--track:0;
+}
+body[data-theme="signal"]{
+  --bg:#0a1014;--surface:#111a20;--surface2:#16232b;--ink:#ecf7f8;--muted:#81959e;--line:#25343c;
+  --accent:#45e3d2;--accent2:#123b3b;--good:#51d49b;--warn:#ffb454;--bad:#ff6b6b;
+  --title:"Arial Narrow","Inter Tight",Arial,sans-serif;--body:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;
+  --radius:2px;--card-radius:2px;--shadow:none;--row:32px;--track:.06em;
+}
+body[data-theme="terracotta"]{
+  --bg:#f3eee8;--surface:#fffaf5;--surface2:#ece6dc;--ink:#283329;--muted:#7c7a6d;--line:#ded4c8;
+  --accent:#a94e32;--accent2:#f3ded5;--good:#50745a;--warn:#bf762f;--bad:#a94e32;
+  --title:"Palatino Linotype",Palatino,Georgia,serif;--body:"Trebuchet MS",Arial,sans-serif;
+  --radius:10px;--card-radius:24px;--shadow:0 16px 40px rgba(89,58,36,.07);--row:40px;--track:0;
+}
+body[data-theme="atelier"]{
+  --bg:#f5f5f2;--surface:#fff;--surface2:#ededE8;--ink:#111;--muted:#73736d;--line:#cbc9c1;
+  --accent:#e64b2f;--accent2:#fae4df;--good:#33755a;--warn:#ae6d19;--bad:#d73d2f;
+  --title:Helvetica,Arial,sans-serif;--body:Helvetica,Arial,sans-serif;
+  --radius:0;--card-radius:0;--shadow:none;--row:35px;--track:-.02em;
+}
+button{border:0;background:none;cursor:pointer}.gallerybar{position:sticky;top:0;z-index:20;background:#111;color:#fff;padding:12px 20px;display:flex;align-items:center;gap:16px;box-shadow:0 4px 18px #0003}
+.gallerybrand{font:700 11px/1 Arial,sans-serif;letter-spacing:.18em;text-transform:uppercase;white-space:nowrap}
+.themes{display:flex;gap:6px;overflow:auto;scrollbar-width:none}.themebtn{color:#aaa;border:1px solid #363636;border-radius:999px;padding:7px 12px;white-space:nowrap;font:600 11px/1 Arial,sans-serif}
+.themebtn:hover{color:#fff}.themebtn.on{background:#fff;color:#111;border-color:#fff}.concept{margin-left:auto;color:#999;font:11px Arial,sans-serif;white-space:nowrap}
+.app{max-width:1600px;margin:auto;padding:22px 24px 52px}.mast{display:flex;align-items:flex-end;gap:22px;margin-bottom:16px}.eyebrow{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-weight:800}
+h1{font:500 34px/1 var(--title);letter-spacing:var(--track);margin:3px 0 0}.date{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--muted)}.date button,.date strong{border:1px solid var(--line);background:var(--surface);padding:6px 10px;border-radius:var(--radius)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 288px;gap:16px}.main{min-width:0}.summary{display:grid;grid-template-columns:1.35fr repeat(3,1fr);gap:10px;margin-bottom:10px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--card-radius);padding:14px 16px;box-shadow:var(--shadow);min-height:108px}.label{font-size:10px;text-transform:uppercase;letter-spacing:.11em;color:var(--muted);font-weight:700}.metric{font:500 30px/1 var(--title);margin:6px 0}.meta{font-size:11px;color:var(--muted)}
+.taskline{display:flex;gap:8px;align-items:center;margin-top:7px}.check{width:15px;height:15px;border:1px solid var(--line);border-radius:var(--radius);display:inline-grid;place-items:center;background:var(--surface2);color:var(--accent);font-size:10px}
+.rail{background:var(--surface);border:1px solid var(--line);border-radius:var(--card-radius);box-shadow:var(--shadow);padding:8px;display:flex;align-items:center;gap:7px;margin-bottom:10px;overflow:auto}
+.chip{border:1px solid var(--line);border-radius:var(--radius);padding:6px 10px;white-space:nowrap;color:var(--muted);background:var(--surface)}.chip.on{background:var(--accent);border-color:var(--accent);color:var(--surface);font-weight:700}.chip b{font-size:10px;opacity:.7;margin-left:4px}
+.search{margin-left:auto;width:170px;border:1px solid var(--line);background:var(--surface2);padding:7px 10px;border-radius:var(--radius);outline:0}.select{border:1px solid var(--line);background:var(--surface2);padding:7px;border-radius:var(--radius)}
+.board{background:var(--surface);border:1px solid var(--line);border-radius:var(--card-radius);box-shadow:var(--shadow);overflow:hidden}.thead,.oprow{display:grid;grid-template-columns:28px minmax(130px,1.1fr) minmax(170px,1.4fr) 110px minmax(100px,1fr) 80px 28px;align-items:center;gap:10px;padding:0 14px}
+.thead{height:30px;color:var(--muted);font-size:9px;letter-spacing:.09em;text-transform:uppercase;border-bottom:1px solid var(--line)}.group{padding:8px 14px;background:var(--surface2);border-bottom:1px solid var(--line);font:600 12px var(--title);display:flex;align-items:center;gap:8px}.group span{color:var(--muted);font:10px var(--body)}
+.oprow{height:var(--row);border-bottom:1px solid var(--line);transition:background .15s}.oprow:hover{background:var(--surface2)}.oprow:last-child{border:0}.apt{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.stay{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}.time{font-variant-numeric:tabular-nums}.person{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.status{display:flex;align-items:center;gap:6px;font-size:11px}.dot{width:7px;height:7px;border-radius:50%;background:var(--good)}.dot.bad{background:var(--bad)}.dot.warn{background:var(--warn)}.more{font-size:18px;color:var(--muted)}
+.side{background:var(--surface);border:1px solid var(--line);border-radius:var(--card-radius);box-shadow:var(--shadow);overflow:hidden;position:sticky;top:66px}.sidehead{padding:16px;border-bottom:1px solid var(--line)}.sidehead h2{font:500 20px/1 var(--title);margin:2px 0 5px}.section{padding:14px 16px;border-bottom:1px solid var(--line)}.section:last-child{border:0}.section h3{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin:0 0 10px}.cleaner{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:8px;margin:9px 0}.avatar{width:26px;height:26px;border-radius:var(--radius);display:grid;place-items:center;background:var(--accent2);color:var(--accent);font-weight:800;font-size:10px}.cleaner small{display:block;color:var(--muted)}.load{font-size:10px;color:var(--muted)}
+.callout{background:var(--accent2);border-left:3px solid var(--accent);padding:10px;font-size:11px}.legend{max-width:1600px;margin:0 auto;padding:0 24px 36px;color:var(--muted);display:flex;gap:20px;flex-wrap:wrap}.legend b{color:var(--ink)}
+@media(max-width:1000px){.layout{grid-template-columns:1fr}.side{position:static;display:grid;grid-template-columns:repeat(3,1fr)}.sidehead{grid-column:1/-1}.summary{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:700px){.app{padding:16px 12px}.concept{display:none}.summary{grid-template-columns:1fr 1fr}.card{padding:12px;min-height:98px}.mast{align-items:flex-start}.date{display:none}.rail{flex-wrap:wrap}.search{order:2;margin:0;flex:1 1 100%}.thead{display:none}.oprow{grid-template-columns:24px 1fr 90px 24px;height:auto;min-height:52px}.oprow .stay,.oprow .person{grid-column:2}.oprow .person{font-size:11px;color:var(--muted)}.oprow .time{grid-column:3;grid-row:1}.oprow .status{grid-column:3;grid-row:2}.side{display:block}.gallerybar{padding:10px 12px}}
+</style>
+</head>
+<body data-theme="aegean">
+<nav class="gallerybar">
+  <div class="gallerybrand">Theme lab</div>
+  <div class="themes">
+    <button class="themebtn on" data-theme="aegean">01 Aegean Editorial</button>
+    <button class="themebtn" data-theme="signal">02 Night Signal</button>
+    <button class="themebtn" data-theme="terracotta">03 Quiet Terracotta</button>
+    <button class="themebtn" data-theme="atelier">04 Swiss Atelier</button>
+  </div>
+  <div class="concept">Daily Ops · visual directions</div>
+</nav>
+<main class="app">
+  <header class="mast">
+    <div><div class="eyebrow">Elysian Collection · Operations</div><h1>Daily Ops</h1></div>
+    <div class="date"><button>‹</button><strong>Sunday, 23 August</strong><button>›</button><button>Today</button></div>
+  </header>
+  <div class="layout">
+    <section class="main">
+      <div class="summary">
+        <article class="card"><div class="label">Priority tasks</div><div class="taskline"><span class="check">✓</span><span>Confirm Glyfada linen delivery</span></div><div class="taskline"><span class="check"></span><span>Call guest at Kolonaki 4</span></div><div class="taskline"><span class="check"></span><span>Replace lockbox at Piraeus</span></div></article>
+        <article class="card"><div class="label">Clean progress</div><div class="metric">18 / 27</div><div class="meta">67% complete · 9 remaining</div></article>
+        <article class="card"><div class="label">Open stays</div><div class="metric">31</div><div class="meta"><span style="color:var(--bad)">●</span> 4 need attention</div></article>
+        <article class="card"><div class="label">Unassigned</div><div class="metric">7</div><div class="meta">Next checkout 10:30</div></article>
+      </div>
+      <div class="rail">
+        <button class="chip on">All <b>34</b></button><button class="chip">Blocking <b>4</b></button><button class="chip">Unknown <b>3</b></button><button class="chip">Open <b>31</b></button><button class="chip">Unassigned <b>7</b></button>
+        <input class="search" placeholder="Search apartment or guest">
+        <select class="select"><option>By area</option><option>By cleaner</option></select>
+      </div>
+      <div class="board">
+        <div class="thead"><span></span><span>Apartment</span><span>Guest / stay</span><span>Turnover</span><span>Cleaner</span><span>Status</span><span></span></div>
+        <div class="group">Evangelismos <span>6 apartments · 2 open</span></div>
+        <div class="oprow"><span class="check"></span><span class="apt">Kolonaki Residence 4</span><span class="stay">Maya Thompson · Airbnb · 3 nights</span><span class="time">10:30 → 15:00</span><span class="person">Αγγελική</span><span class="status"><i class="dot bad"></i>Blocked</span><button class="more">⋯</button></div>
+        <div class="oprow"><span class="check"></span><span class="apt">Lycabettus Suite</span><span class="stay">Jon Bell · Booking · 2 nights</span><span class="time">11:00 → 16:00</span><span class="person">Unassigned</span><span class="status"><i class="dot warn"></i>Open</span><button class="more">⋯</button></div>
+        <div class="oprow"><span class="check">✓</span><span class="apt">Museum View 2</span><span class="stay">Elena Rossi · Direct · 4 nights</span><span class="time">12:00 → 15:00</span><span class="person">Μαρία</span><span class="status"><i class="dot"></i>Ready</span><button class="more">⋯</button></div>
+        <div class="group">Syntagma <span>5 apartments · 1 open</span></div>
+        <div class="oprow"><span class="check"></span><span class="apt">Ermou Loft 7</span><span class="stay">Noah Williams · Airbnb · 5 nights</span><span class="time">10:00 → 15:00</span><span class="person">Δήμητρα</span><span class="status"><i class="dot warn"></i>Open</span><button class="more">⋯</button></div>
+        <div class="oprow"><span class="check"></span><span class="apt">Plaka House</span><span class="stay">Sofia Martin · Booking · 2 nights</span><span class="time">11:30 → 16:00</span><span class="person">Ελένη</span><span class="status"><i class="dot"></i>Ready</span><button class="more">⋯</button></div>
+        <div class="oprow"><span class="check"></span><span class="apt">Acropolis Studio</span><span class="stay">Liam Chen · Direct · 3 nights</span><span class="time">12:00 → 15:30</span><span class="person">Unassigned</span><span class="status"><i class="dot bad"></i>Blocked</span><button class="more">⋯</button></div>
+        <div class="group">Glyfada <span>8 apartments · 3 open</span></div>
+        <div class="oprow"><span class="check">✓</span><span class="apt">Glyfada Sea 2</span><span class="stay">Ava Patel · Airbnb · 6 nights</span><span class="time">10:00 → 14:00</span><span class="person">Μαρία</span><span class="status"><i class="dot"></i>Ready</span><button class="more">⋯</button></div>
+        <div class="oprow"><span class="check"></span><span class="apt">Coastal Garden 1</span><span class="stay">Oscar Lind · Booking · 4 nights</span><span class="time">11:00 → 15:00</span><span class="person">Αγγελική</span><span class="status"><i class="dot warn"></i>Open</span><button class="more">⋯</button></div>
+      </div>
+    </section>
+    <aside class="side">
+      <header class="sidehead"><div class="label">Live overview</div><h2>People & pressure</h2><div class="meta">Workload updates as assignments change</div></header>
+      <section class="section"><h3>Cleaner load</h3>
+        <div class="cleaner"><span class="avatar">ΑΓ</span><span>Αγγελική<small>3 active · 1 blocked</small></span><b class="load">6 / 7</b></div>
+        <div class="cleaner"><span class="avatar">ΜΑ</span><span>Μαρία<small>4 active · on track</small></span><b class="load">5 / 7</b></div>
+        <div class="cleaner"><span class="avatar">ΔΗ</span><span>Δήμητρα<small>2 active · on track</small></span><b class="load">3 / 6</b></div>
+      </section>
+      <section class="section"><h3>Pressure window</h3><div class="callout"><b>11:00–12:00</b><br>Eight turnovers begin within one hour. Two are still unassigned.</div></section>
+      <section class="section"><h3>Quick note</h3><div class="meta">Three late check-outs are waiting for guest confirmation.</div></section>
+    </aside>
+  </div>
+</main>
+<footer class="legend"><span><b>Aegean Editorial</b> · coastal, cultivated, guest-facing</span><span><b>Night Signal</b> · tactical, fast, control-room</span><span><b>Quiet Terracotta</b> · warm, human, residential</span><span><b>Swiss Atelier</b> · graphic, precise, modernist</span></footer>
+<script>
+const buttons=[...document.querySelectorAll('.themebtn')];
+buttons.forEach(button=>button.addEventListener('click',()=>{
+  document.body.dataset.theme=button.dataset.theme;
+  buttons.forEach(item=>item.classList.toggle('on',item===button));
+  localStorage.setItem('dailyOpsThemePreview',button.dataset.theme);
+}));
+const saved=localStorage.getItem('dailyOpsThemePreview');
+if(saved){const button=buttons.find(item=>item.dataset.theme===saved);if(button)button.click()}
+</script>
+</body>
+</html>
