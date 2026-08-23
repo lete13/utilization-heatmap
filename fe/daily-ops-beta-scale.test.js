@@ -168,7 +168,7 @@ assert(panel.innerHTML.includes('tone-hot'), 'ops-urgency hot tone is rendered')
 assert(panel.innerHTML.includes('tone-warn'), 'ops-urgency warn tone is rendered');
 assert(panel.innerHTML.includes('tone-done'), 'ops-urgency done tone is rendered');
 assert(panel.innerHTML.includes('ob-tone-legend'), 'color legend is on the board');
-assert(panel.innerHTML.includes('>Blocking</span>') || /tone-hot"><\/i>Blocking/.test(panel.innerHTML), 'legend names the blocking tone');
+assert(!/>Blocking</.test(panel.innerHTML), 'blocking wording removed from the board');
 assert(panel.innerHTML.includes('Neutral — nothing to flag'), 'legend names the neutral tone');
 assert(panel.innerHTML.includes('data-ob-action="manage-cleaners"'), 'roster manage control present');
 assert(panel.innerHTML.includes('Manage cleaners'), 'roster manage control is labelled in English');
@@ -193,21 +193,30 @@ assert(panel.innerHTML.includes('ob-nchip cool'), 'sofa / Early notes render as 
 // in sentence case while the underlying comment string is left alone. The notes
 // column is ~138px wide and also holds the free-text field, so only the leading
 // tag is drawn and the remainder becomes a hover-titled count.
-assert(/ob-nchip hot"><span>Priority</.test(panel.innerHTML), 'the actionable flag leads and is hot/red');
+// Every flag carries its own colour class (park = blue, priority = red,
+// late = orange, early = yellow) and collapses to an icon chip so three or
+// four tags still fit the narrow notes column without being cut off.
+assert(/ob-t-priority/.test(panel.innerHTML), 'the actionable flag leads and is hot/red');
 assert(!/>PRIORITY</.test(panel.innerHTML), 'no chip shouts the raw stored token');
 assert(rows[0].comments.includes('PRIORITY'), 'the stored comment token itself is untouched');
 assert(
-  /ob-nchip hot"><span>Priority<\/span><button[^>]*data-ob-flag="priority"/.test(panel.innerHTML),
+  /ob-t-priority[\s\S]{0,200}?data-ob-flag="priority"/.test(panel.innerHTML),
   'a flag-backed tag stays removable straight from its chip'
 );
-const moreChip = new RegExp(
-  '<span class="ob-nchip ob-nmore"><span aria-hidden="true">\\+(\\d+)</span>' +
-  '<span class="ob-sr">([^<]*)</span></span>'
-).exec(panel.innerHTML);
-assert(moreChip, 'the tags that do not fit collapse into a count');
-assert(Number(moreChip[1]) === 3, 'the count covers the three remaining tags');
+['ob-t-priority', 'ob-t-late', 'ob-t-early'].forEach((cls) => {
+  assert(panel.innerHTML.includes(cls), 'per-tag colour class present: ' + cls);
+});
+assert(panel.innerHTML.includes('ob-nchip-ico'), 'known flags render as compact icon chips');
+// Every active tag is rendered as its own chip — no "+N" collapsing — so an
+// operator sees the full flag set for a row. Known flags render as icon chips
+// (label kept in title/sr text); anything else keeps its visible text.
+assert(!/ob-nmore/.test(panel.innerHTML), 'tags no longer collapse into a count');
 ['Late 12:00', 'Prepare 1 sofa bed', 'Early check-in'].forEach((label) => {
-  assert(moreChip[2].includes(label), 'the count names ' + label + ' for assistive tech');
+  assert(
+    panel.innerHTML.includes('<span>' + label + '</span>') ||
+    panel.innerHTML.includes('<span class="ob-sr">' + label + '</span>'),
+    'every active tag is present on the row: ' + label
+  );
 });
 
 const css = fs.readFileSync(path.join(rootDir, 'fe', 'daily-ops-beta.css'), 'utf8');
@@ -272,31 +281,24 @@ assert(panel.innerHTML.includes('Arrival Studio'), 'All filter still shows arriv
 
 // The triage rail must discriminate, not just restate "all". Every segment
 // carries a plain "Label N" accessible name so counts are assertable.
-['all', 'attention', 'unknown', 'open', 'unassigned', 'done'].forEach((key) => {
+['all', 'unknown', 'open', 'unassigned', 'done'].forEach((key) => {
   assert(
     panel.innerHTML.includes('data-ob-filter="' + key + '"'),
     'triage rail keeps the ' + key + ' segment'
   );
 });
-assert(panel.innerHTML.includes('Blocking'), 'rail exposes a Blocking segment');
+assert(!panel.innerHTML.includes('data-ob-filter="attention"'), 'Blocking segment removed from the rail');
 assert(panel.innerHTML.includes('Unknown check-in'), 'rail exposes an Unknown check-in segment');
 
 const railCount = (label) => {
   const hit = panel.innerHTML.match(new RegExp('aria-label="' + label + ' (\\d+)"'));
   return hit ? Number(hit[1]) : -1;
 };
-const blocking = railCount('Blocking');
 const openCount = railCount('Open');
 const allCount = railCount('All');
-assert(blocking > 0 && openCount > 0 && allCount > 0, 'rail segments carry live counts');
-assert(blocking < openCount, 'Blocking is narrower than Open (segment actually discriminates)');
+assert(railCount('Blocking') === -1, 'Blocking segment no longer present');
+assert(openCount > 0 && allCount > 0, 'rail segments carry live counts');
 assert(openCount < allCount, 'Open is narrower than All');
-
-// Done work never blocks, and neither does a row that already has a crew.
-assert(
-  blocking <= allCount - railCount('Done'),
-  'finished rows are excluded from Blocking'
-);
 
 // Grouping: "default" sort means source order, so it must never regroup.
 assert(!panel.innerHTML.includes('ob-grp'), 'default sort renders an ungrouped board');
