@@ -489,10 +489,27 @@
       // a stable per-flag class so each tag can carry its own colour
       var kind = flagForPart(part) || (/sofa bed/i.test(part) ? 'sofa' : (/^Long stay/i.test(part) ? 'longstay' : ''));
       var kindCls = kind ? ' ob-t-' + kind : '';
+      // The notes column is narrow, but the row height must stay fixed and no
+      // tag may be cut off. Known flags therefore render as icon + a short
+      // word: the glyph and colour carry the meaning at a glance, the short
+      // label makes it readable without hovering. Full wording stays for
+      // assistive tech.
+      var ICONS = { late: '\u23F0', priority: '\u2757', park: '\uD83D\uDC76', early: '\u2600\uFE0F' };
+      var SHORT = { priority: 'Priority', park: 'Park bed', early: 'Early' };
+      var label = chipLabel(part);
+      var icon = ICONS[kind] || '';
+      // "Late Checkout: 12:00" already reads as "Late 12:00" — keep the time.
+      var shortLabel = SHORT[kind] || label;
+      var body = icon
+        ? '<span class="ob-nico" aria-hidden="true">' + icon + '</span>' +
+          '<span class="ob-nlabel">' + esc(shortLabel) + '</span>' +
+          '<span class="ob-sr">' + esc(label) + '</span>'
+        : '<span>' + esc(label) + '</span>';
+      var compact = icon ? ' ob-nchip-ico' : '';
       var remove = flag
         ? '<button type="button" data-ob-action="flag" data-ob-index="' + index + '" data-ob-flag="' + flag + '" aria-label="Remove ' + esc(part) + '">×</button>'
         : '';
-      return '<span class="ob-nchip' + partTone(part) + kindCls + '"><span>' + esc(chipLabel(part)) + '</span>' + remove + '</span>';
+      return '<span class="ob-nchip' + partTone(part) + kindCls + compact + '">' + body + remove + '</span>';
     }).join('');
     return '<div class="ob-nchips ob-nchips-all">' + chips + '</div>';
   }

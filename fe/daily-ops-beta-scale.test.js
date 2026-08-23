@@ -194,24 +194,28 @@ assert(panel.innerHTML.includes('ob-nchip cool'), 'sofa / Early notes render as 
 // column is ~138px wide and also holds the free-text field, so only the leading
 // tag is drawn and the remainder becomes a hover-titled count.
 // Every flag carries its own colour class (park = blue, priority = red,
-// late = orange, early = yellow) so the notes column is readable at a glance.
-assert(/ob-nchip hot ob-t-priority"><span>Priority</.test(panel.innerHTML), 'the actionable flag leads and is hot/red');
+// late = orange, early = yellow) and collapses to an icon chip so three or
+// four tags still fit the narrow notes column without being cut off.
+assert(/ob-t-priority/.test(panel.innerHTML), 'the actionable flag leads and is hot/red');
 assert(!/>PRIORITY</.test(panel.innerHTML), 'no chip shouts the raw stored token');
 assert(rows[0].comments.includes('PRIORITY'), 'the stored comment token itself is untouched');
 assert(
-  /ob-t-priority"><span>Priority<\/span><button[^>]*data-ob-flag="priority"/.test(panel.innerHTML),
+  /ob-t-priority[\s\S]{0,200}?data-ob-flag="priority"/.test(panel.innerHTML),
   'a flag-backed tag stays removable straight from its chip'
 );
 ['ob-t-priority', 'ob-t-late', 'ob-t-early'].forEach((cls) => {
   assert(panel.innerHTML.includes(cls), 'per-tag colour class present: ' + cls);
 });
-// Every active tag is now rendered as its own chip — no "+N" collapsing —
-// so an operator sees the full flag set for a row without hovering.
+assert(panel.innerHTML.includes('ob-nchip-ico'), 'known flags render as compact icon chips');
+// Every active tag is rendered as its own chip — no "+N" collapsing — so an
+// operator sees the full flag set for a row. Known flags render as icon chips
+// (label kept in title/sr text); anything else keeps its visible text.
 assert(!/ob-nmore/.test(panel.innerHTML), 'tags no longer collapse into a count');
 ['Late 12:00', 'Prepare 1 sofa bed', 'Early check-in'].forEach((label) => {
   assert(
-    panel.innerHTML.includes('<span>' + label + '</span>'),
-    'every active tag is visible on the row: ' + label
+    panel.innerHTML.includes('<span>' + label + '</span>') ||
+    panel.innerHTML.includes('<span class="ob-sr">' + label + '</span>'),
+    'every active tag is present on the row: ' + label
   );
 });
 

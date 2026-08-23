@@ -1957,6 +1957,37 @@
 #tab-ops .ob-nchips-all .ob-nchip { flex: none; max-width: none; }
 #tab-ops .ob-nchips-all .ob-nchip > span { overflow: visible; text-overflow: clip; }
 
+/* Known flags render as icon + short word, so three or four still fit the
+   notes column without being cut off and without hovering to identify them. */
+#tab-ops .ob-nchip.ob-nchip-ico {
+  padding: 0 6px;
+  min-width: 0;
+  gap: 3px;
+}
+#tab-ops .ob-nchip-ico .ob-nico { font-size: 10.5px; line-height: 1; flex: none; }
+#tab-ops .ob-nchip-ico .ob-nlabel { font-size: 10.5px; line-height: 1; white-space: nowrap; }
+#tab-ops .ob-nchip-ico button { margin-left: 1px; }
+/* keep the remove "×" out of the way until the row is hovered */
+#tab-ops .ob-nchip-ico button { display: none; }
+#tab-ops .ob-dispatch-row:hover .ob-nchip-ico button { display: inline-block; }
+
+/* ── Multi-select removed from the board ───────────────────────────────────
+   The per-row checkbox and its bulk bar were not used in practice and cost a
+   whole column. Hiding them here frees that width for the notes column and
+   pulls every column left. The round "mark clean" tick is untouched. */
+#tab-ops .ob-c-sel,
+#tab-ops .ob-bulk,
+#tab-ops .ob-selectall { display: none !important; }
+
+/* ── Column rebalance ──────────────────────────────────────────────────────
+   Space reclaimed from the select column, plus a tighter Stay column, goes
+   to Notes so a row can carry four flags without clipping. */
+#tab-ops .ob-c-prop   { width: 22%; }
+#tab-ops .ob-c-stay   { width: 15%; }
+#tab-ops .ob-c-crew   { width: 12%; }
+#tab-ops .ob-c-task   { width: 9%; }
+#tab-ops .ob-c-note   { width: 24%; }
+
 /* Row height is pinned so tags never push the row taller */
 #tab-ops .ob-dispatch-row > td { height: 34px; }
 #tab-ops .ob-dispatch-row > td.ob-c-note { max-width: 0; }
