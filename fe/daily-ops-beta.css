@@ -2134,3 +2134,99 @@
 /* tooltip: no arrow border seam, tighter type */
 .leaflet-tooltip.amap-tooltip { font: inherit; white-space: nowrap; }
 .leaflet-tooltip.amap-tooltip::before { display: none; }
+
+/* ── Distance measurement ──────────────────────────────────────────────────
+   Click two pins; the bar above the map reports the straight-line distance. */
+.amap-measure {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 14px; margin-bottom: 10px; border-radius: 11px;
+  font-size: 12.5px; min-height: 38px;
+  border: 1px solid rgba(0,0,0,.07); background: #fff;
+}
+.amap-measure-idle { color: #98a0a6; background: transparent; border-style: dashed; }
+.amap-measure-half { color: #16283a; }
+.amap-measure-done { color: #16283a; box-shadow: 0 1px 2px rgba(60,50,30,.05); }
+.amap-measure-hint { color: #98a0a6; }
+.amap-measure-from b, .amap-measure-pair b { font-weight: 700; }
+.amap-measure-pair { display: inline-flex; align-items: center; gap: 7px; }
+.amap-measure-arrow { color: #98a0a6; }
+.amap-measure-km {
+  font-size: 15px; font-weight: 750; letter-spacing: -.01em; color: #0f1e2e;
+  background: #eef1f4; border-radius: 999px; padding: 3px 12px;
+}
+.amap-measure-note { font-size: 10.5px; color: #98a0a6; }
+.amap-measure-clear {
+  margin-left: auto; font: inherit; font-size: 11.5px; font-weight: 600;
+  padding: 5px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid rgba(0,0,0,.12); background: #fff; color: #626967;
+}
+.amap-measure-clear:hover { border-color: #0f1e2e; color: #0f1e2e; }
+
+/* a picked pin keeps a dark ring so the pair is obvious on a busy map */
+.amap-pin-sel svg path { stroke: #0f1e2e; stroke-width: 3; }
+.amap-pin-sel { transform: scale(1.2); }
+.amap-pin-sel::before {
+  content: "";
+  position: absolute; left: 50%; top: 4px;
+  width: 38px; height: 38px; margin-left: -19px;
+  border-radius: 50%; border: 2px solid #0f1e2e; opacity: .35;
+}
+
+/* ── Nearest-with-capacity shortlist ───────────────────────────────────────
+   Answers "this stay has to move — where can it go, close by, that still
+   fits the party?" */
+.amap-measure-find {
+  font: inherit; font-size: 11.5px; font-weight: 600;
+  padding: 5px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid #0f1e2e; background: #0f1e2e; color: #fff;
+}
+.amap-measure-find:hover { background: #1b2f45; }
+.amap-measure-cap {
+  font-size: 10.5px; font-weight: 600; color: #626967;
+  background: #eef1f4; border-radius: 999px; padding: 2px 8px; margin-left: 4px;
+}
+
+.amap-near { display: none; }
+.amap-near-on {
+  display: block; margin-bottom: 10px; padding: 10px 14px;
+  background: #fff; border: 1px solid rgba(0,0,0,.07); border-radius: 11px;
+  box-shadow: 0 1px 2px rgba(60,50,30,.05);
+}
+.amap-near-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; font-weight: 600; color: #98a0a6;
+  text-transform: uppercase; letter-spacing: .04em;
+  padding-bottom: 7px; margin-bottom: 4px; border-bottom: 1px solid rgba(0,0,0,.06);
+}
+.amap-near-head b { color: #16283a; text-transform: none; letter-spacing: 0; font-size: 12px; }
+.amap-near-close {
+  margin-left: auto; font: inherit; font-size: 10.5px; font-weight: 600;
+  border: none; background: none; color: #98a0a6; cursor: pointer; text-transform: none;
+}
+.amap-near-close:hover { color: #c0483e; }
+.amap-near-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,.045); font-size: 12.5px;
+}
+.amap-near-row:last-child { border-bottom: none; }
+.amap-near-rank {
+  width: 18px; height: 18px; flex: none; border-radius: 50%;
+  background: #eef1f4; color: #626967; font-size: 10.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.amap-near-name { font-weight: 600; color: #16283a; flex: 1 1 auto; }
+.amap-near-cap { font-size: 11px; color: #626967; }
+.amap-near-status { font-size: 11px; font-weight: 700; width: 74px; text-align: right; }
+.amap-near-km {
+  font-size: 12px; font-weight: 700; color: #0f1e2e;
+  background: #eef1f4; border-radius: 999px; padding: 2px 9px; min-width: 58px; text-align: center;
+}
+.amap-near-empty { font-size: 12.5px; color: #98a0a6; font-style: italic; }
+
+/* a shortlisted pin gets a soft dark halo, weaker than the picked origin */
+.amap-pin-near::before {
+  content: "";
+  position: absolute; left: 50%; top: 6px;
+  width: 32px; height: 32px; margin-left: -16px;
+  border-radius: 50%; border: 2px dashed #0f1e2e; opacity: .3;
+}

@@ -25,10 +25,12 @@
 
   // A teardrop pin drawn as inline SVG: reads as a map marker rather than a
   // dot, keeps its colour meaning, and stays crisp at every zoom level.
-  function pinIcon(kind) {
+  function pinIcon(kind, selected, shortlisted) {
     var fill = COLOR[kind];
     var html =
-      '<div class="amap-pin amap-pin-' + kind + '">' +
+      '<div class="amap-pin amap-pin-' + kind +
+        (selected ? ' amap-pin-sel' : '') +
+        (shortlisted ? ' amap-pin-near' : '') + '">' +
         '<svg width="26" height="34" viewBox="0 0 26 34" xmlns="http://www.w3.org/2000/svg">' +
           '<path d="M13 33.2C13 33.2 24.6 20.9 24.6 13A11.6 11.6 0 1 0 1.4 13c0 7.9 11.6 20.2 11.6 20.2z" ' +
             'fill="' + fill + '" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round"/>' +
@@ -50,6 +52,186 @@
   var leafletLoading = false;
   var rentalInfo = null;   // Property Info records from the database
   var rentalInfoLoading = false;
+  var selA = null;         // first apartment picked for a distance measurement
+  var selB = null;         // second one
+  var lineLayer = null;    // the drawn connection
+  var nearList = null;     // results of a "nearest that can take them" search
+
+  // The capacity a property can actually take: the stated maximum, falling
+  // back to its base capacity when no maximum was ever set.
+  function capNumber(apt) {
+    var c = capacityOf(apt);
+    return c.max != null ? c.max : c.base;
+  }
+
+  // The five closest properties that could host the same party — same
+  // capacity or larger. Used when a stay has to be moved somewhere else.
+  function nearestBigEnough(origin, limit) {
+    var oc = coordsOf(origin);
+    if (!oc) return [];
+    var need = capNumber(origin);
+
+    return apartments()
+      .filter(function (a) {
+        if (String(a.id) === String(origin.id)) return false;
+        if (!coordsOf(a)) return false;
+        if (need == null) return true;          // nothing to compare against
+        var c = capNumber(a);
+        return c != null && c >= need;
+      })
+      .map(function (a) {
+        return { apt: a, km: distanceKm(oc, coordsOf(a)) };
+      })
+      .sort(function (x, y) { return x.km - y.km; })
+      .slice(0, limit || 5);
+  }
+
+  function runNearestSearch() {
+    if (!selA) return;
+    selB = null;
+    nearList = nearestBigEnough(selA, 5);
+    draw();
+  }
+
+  function clearNearest() {
+    nearList = null;
+    draw();
+  }
+
+  function inNearList(apt) {
+    if (!nearList) return false;
+    for (var i = 0; i < nearList.length; i++) {
+      if (String(nearList[i].apt.id) === String(apt.id)) return true;
+    }
+    return false;
+  }
+
+  // Straight-line distance in km. Real travel is always longer, so this is a
+  // comparison tool ("which of these is nearer"), not a routing estimate.
+  function distanceKm(a, b) {
+    var R = 6371;
+    var rad = function (d) { return d * Math.PI / 180; };
+    var dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+    var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  function coordsOf(apt) {
+    var la = parseFloat(apt.lat), ln = parseFloat(apt.lng);
+    return (isFinite(la) && isFinite(ln)) ? { lat: la, lng: ln } : null;
+  }
+
+  // Clicking pins picks the two ends of a measurement: first click sets A,
+  // second sets B, a third starts a fresh pair.
+  function pickForMeasure(apt) {
+    if (selA && selB) { selA = apt; selB = null; nearList = null; }
+    else if (!selA) { selA = apt; nearList = null; }
+    else if (String(apt.id) === String(selA.id)) { selA = null; nearList = null; }
+    else { selB = apt; }
+    draw();
+  }
+
+  function clearMeasure() {
+    selA = null; selB = null; nearList = null;
+    draw();
+  }
+
+  function isSelected(apt) {
+    return (selA && String(selA.id) === String(apt.id)) ||
+           (selB && String(selB.id) === String(apt.id));
+  }
+
+  function renderMeasureBar() {
+    var bar = byId('amap-measure');
+    if (!bar) return;
+
+    if (!selA) {
+      bar.className = 'amap-measure amap-measure-idle';
+      bar.innerHTML = '<span class="amap-measure-hint">Click a pin to measure distances or find nearby options.</span>';
+      renderNearList();
+      return;
+    }
+    if (!selB) {
+      var need = capNumber(selA);
+      bar.className = 'amap-measure amap-measure-half';
+      bar.innerHTML =
+        '<span class="amap-measure-from"><b>' + esc(selA.name || selA.id) + '</b> selected' +
+          (need != null ? ' <span class="amap-measure-cap">sleeps ' + need + '</span>' : '') + '</span>' +
+        '<span class="amap-measure-hint">— click a second pin to measure</span>' +
+        '<button type="button" class="amap-measure-find" id="amap-find">' +
+          'Nearest 5' + (need != null ? ' that sleep ' + need + '+' : '') +
+        '</button>' +
+        '<button type="button" class="amap-measure-clear" id="amap-clear">Clear</button>';
+      wireClear();
+      wireFind();
+      renderNearList();
+      return;
+    }
+
+    var ca = coordsOf(selA), cb = coordsOf(selB);
+    var km = (ca && cb) ? distanceKm(ca, cb) : null;
+    bar.className = 'amap-measure amap-measure-done';
+    bar.innerHTML =
+      '<span class="amap-measure-pair"><b>' + esc(selA.name || selA.id) + '</b>' +
+        '<span class="amap-measure-arrow">→</span>' +
+        '<b>' + esc(selB.name || selB.id) + '</b></span>' +
+      '<span class="amap-measure-km">' + (km == null ? '—' : (km < 1 ? Math.round(km * 1000) + ' m' : km.toFixed(1) + ' km')) + '</span>' +
+      '<span class="amap-measure-note">straight line</span>' +
+      '<button type="button" class="amap-measure-clear" id="amap-clear">Clear</button>';
+    wireClear();
+    renderNearList();
+  }
+
+  function wireClear() {
+    var b = byId('amap-clear');
+    if (b) b.addEventListener('click', clearMeasure);
+  }
+
+  function wireFind() {
+    var b = byId('amap-find');
+    if (b) b.addEventListener('click', runNearestSearch);
+  }
+
+  // The result list doubles as a shortlist: each row shows how far it is, how
+  // many it sleeps and whether it is actually free at the chosen moment, so a
+  // relocation decision can be made without leaving the map.
+  function renderNearList() {
+    var box = byId('amap-near');
+    if (!box) return;
+
+    if (!nearList) { box.innerHTML = ''; box.className = 'amap-near'; return; }
+
+    if (!nearList.length) {
+      box.className = 'amap-near amap-near-on';
+      box.innerHTML = '<div class="amap-near-empty">No other property on the map can take that many guests.</div>';
+      return;
+    }
+
+    var when = chosenMoment();
+    var rows = nearList.map(function (hit, i) {
+      var st = statusOf(hit.apt, when);
+      var cap = capNumber(hit.apt);
+      return '<div class="amap-near-row">' +
+        '<span class="amap-near-rank">' + (i + 1) + '</span>' +
+        '<span class="amap-near-name">' + esc(hit.apt.name || hit.apt.id) + '</span>' +
+        '<span class="amap-near-cap">sleeps ' + (cap == null ? '—' : cap) + '</span>' +
+        '<span class="amap-near-status" style="color:' + COLOR[st.key] + '">' + LABEL[st.key] + '</span>' +
+        '<span class="amap-near-km">' +
+          (hit.km < 1 ? Math.round(hit.km * 1000) + ' m' : hit.km.toFixed(1) + ' km') +
+        '</span>' +
+      '</div>';
+    }).join('');
+
+    box.className = 'amap-near amap-near-on';
+    box.innerHTML =
+      '<div class="amap-near-head">Closest options for <b>' + esc(selA.name || selA.id) + '</b>' +
+        '<button type="button" class="amap-near-close" id="amap-near-x">Hide</button></div>' +
+      rows;
+
+    var x = byId('amap-near-x');
+    if (x) x.addEventListener('click', clearNearest);
+  }
 
   // ── helpers ───────────────────────────────────────────────────────────────
   function esc(s) {
@@ -242,6 +424,8 @@
           '<span class="amap-lg"><i style="background:' + COLOR.blocked + '"></i>Blocked <b id="amap-n-blocked">0</b></span>' +
           '<span class="amap-lg amap-lg-muted" id="amap-missing-wrap">No coordinates <b id="amap-n-missing">0</b></span>' +
         '</div>' +
+        '<div id="amap-measure" class="amap-measure amap-measure-idle"></div>' +
+        '<div id="amap-near" class="amap-near"></div>' +
         '<div id="amap-canvas" class="amap-canvas"></div>' +
         '<div id="amap-missing" class="amap-missing"></div>' +
       '</div>';
@@ -328,10 +512,11 @@
       points.push([la, ln]);
 
       var marker = L.marker([la, ln], {
-        icon: pinIcon(st.key),
+        icon: pinIcon(st.key, isSelected(apt), inNearList(apt)),
         riseOnHover: true,
         title: ''
       });
+      marker.on('click', function () { pickForMeasure(apt); });
 
       var b = st.booking;
       var detail = '';
@@ -402,6 +587,43 @@
       map.fitBounds(L.latLngBounds(points).pad(0.15));
       if (points.length === 1) map.setZoom(14);
     }
+
+    // draw (or clear) the measured connection
+    if (lineLayer) { map.removeLayer(lineLayer); lineLayer = null; }
+    if (selA && selB) {
+      var ca = coordsOf(selA), cb = coordsOf(selB);
+      if (ca && cb) {
+        lineLayer = L.polyline([[ca.lat, ca.lng], [cb.lat, cb.lng]], {
+          color: '#0f1e2e',
+          weight: 2.5,
+          opacity: 0.85,
+          dashArray: '6 6'
+        }).addTo(map);
+        // frame both ends so the measurement is actually visible
+        map.fitBounds(L.latLngBounds([[ca.lat, ca.lng], [cb.lat, cb.lng]]).pad(0.35));
+      }
+    } else if (selA && nearList && nearList.length) {
+      // spokes from the origin to each shortlisted property
+      var oc = coordsOf(selA);
+      if (oc) {
+        var spokes = [];
+        var frame = [[oc.lat, oc.lng]];
+        nearList.forEach(function (hit) {
+          var c = coordsOf(hit.apt);
+          if (!c) return;
+          spokes.push([[oc.lat, oc.lng], [c.lat, c.lng]]);
+          frame.push([c.lat, c.lng]);
+        });
+        lineLayer = L.polyline(spokes, {
+          color: '#0f1e2e',
+          weight: 1.8,
+          opacity: 0.5,
+          dashArray: '4 6'
+        }).addTo(map);
+        map.fitBounds(L.latLngBounds(frame).pad(0.3));
+      }
+    }
+    renderMeasureBar();
   }
 
   // Leaflet needs a size recalculation when its container becomes visible.
