@@ -23,10 +23,33 @@
   var COLOR = { free: '#2e9e6b', booked: '#2f6fb5', blocked: '#c0483e' };
   var LABEL = { free: 'Available', booked: 'Reserved', blocked: 'Blocked' };
 
+  // A teardrop pin drawn as inline SVG: reads as a map marker rather than a
+  // dot, keeps its colour meaning, and stays crisp at every zoom level.
+  function pinIcon(kind) {
+    var fill = COLOR[kind];
+    var html =
+      '<div class="amap-pin amap-pin-' + kind + '">' +
+        '<svg width="26" height="34" viewBox="0 0 26 34" xmlns="http://www.w3.org/2000/svg">' +
+          '<path d="M13 33.2C13 33.2 24.6 20.9 24.6 13A11.6 11.6 0 1 0 1.4 13c0 7.9 11.6 20.2 11.6 20.2z" ' +
+            'fill="' + fill + '" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round"/>' +
+          '<circle cx="13" cy="12.8" r="4.1" fill="#ffffff" fill-opacity=".92"/>' +
+        '</svg>' +
+      '</div>';
+    return L.divIcon({
+      html: html,
+      className: 'amap-pin-wrap',
+      iconSize: [26, 34],
+      iconAnchor: [13, 33],   // tip of the drop sits on the coordinate
+      tooltipAnchor: [0, -30]
+    });
+  }
+
   var map = null;          // Leaflet map instance
   var layer = null;        // marker layer group
   var built = false;       // panel markup created
   var leafletLoading = false;
+  var rentalInfo = null;   // Property Info records from the database
+  var rentalInfoLoading = false;
 
   // ── helpers ───────────────────────────────────────────────────────────────
   function esc(s) {
@@ -62,14 +85,19 @@
   }
 
   // Max capacity, read the same way Daily Ops reads it so the two can never
-  // disagree: the Hosthub rental cache wins, then the manually set base
-  // capacity stored on the apartment itself.
+  // disagree: the saved Property Info record (Postgres, via /api/rental-info)
+  // wins, then the base capacity mirrored onto the apartment itself.
   function capacityOf(apt) {
     var rules = {};
+    var id = apt && apt.id;
     try {
-      if (typeof _opsRentalInfo !== 'undefined' && _opsRentalInfo && apt && apt.id &&
-          _opsRentalInfo[apt.id] && _opsRentalInfo[apt.id].houseRules) {
-        rules = _opsRentalInfo[apt.id].houseRules;
+      // our own copy, fetched straight from the database
+      if (id && rentalInfo && rentalInfo[id] && rentalInfo[id].houseRules) {
+        rules = rentalInfo[id].houseRules;
+      // otherwise reuse whatever Daily Ops already loaded
+      } else if (typeof _opsRentalInfo !== 'undefined' && _opsRentalInfo && id &&
+                 _opsRentalInfo[id] && _opsRentalInfo[id].houseRules) {
+        rules = _opsRentalInfo[id].houseRules;
       }
     } catch (e) { rules = {}; }
 
@@ -86,23 +114,36 @@
     };
   }
 
-  // The capacity cache is fetched lazily by Daily Ops; ask for it if it has
-  // not been loaded yet, and redraw once it lands.
+  // Pull the Property Info records (house rules incl. maximum_guests) from the
+  // database. The map must not depend on Daily Ops having been opened first,
+  // so it asks for them itself and redraws when they land.
   function ensureCapacityData() {
+    if (rentalInfo || rentalInfoLoading) return;
+    // if Daily Ops already has them, start from that and skip the round trip
     try {
-      if (typeof _opsRentalInfo !== 'undefined' && _opsRentalInfo) return;
-      if (typeof _opsPrefetchRentalInfo === 'function') {
-        _opsPrefetchRentalInfo();
-        var tries = 0;
-        var poll = setInterval(function () {
-          var ready = (typeof _opsRentalInfo !== 'undefined' && _opsRentalInfo);
-          if (ready || tries++ > 25) {
-            clearInterval(poll);
-            if (ready && map) draw();
-          }
-        }, 400);
+      if (typeof _opsRentalInfo !== 'undefined' && _opsRentalInfo &&
+          Object.keys(_opsRentalInfo).length) {
+        rentalInfo = _opsRentalInfo;
+        return;
       }
-    } catch (e) { /* capacity is a nice-to-have; the map still works without it */ }
+    } catch (e) { /* fall through to the fetch */ }
+
+    rentalInfoLoading = true;
+    fetch('/api/rental-info')
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (data) {
+        rentalInfo = data || {};
+        rentalInfoLoading = false;
+        // share it back so Daily Ops does not repeat the request
+        try {
+          if (typeof _opsRentalInfo !== 'undefined' && !_opsRentalInfo) _opsRentalInfo = rentalInfo;
+        } catch (e) {}
+        if (map) draw();
+      })
+      .catch(function () {
+        rentalInfo = {};
+        rentalInfoLoading = false;
+      });
   }
 
   function bookings() {
@@ -257,11 +298,19 @@
     var when = chosenMoment();
 
     if (!map) {
-      map = L.map('amap-canvas', { scrollWheelZoom: true });
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors'
+      map = L.map('amap-canvas', {
+        scrollWheelZoom: true,
+        zoomControl: false,
+        attributionControl: true
+      });
+      // A muted, low-contrast basemap: the pins are the information here, the
+      // map is context. The default OSM style fights the markers for attention.
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 20,
+        subdomains: 'abcd',
+        attribution: '&copy; OpenStreetMap &copy; CARTO'
       }).addTo(map);
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
       map.setView([38.2, 23.8], 6); // Greece, until we know the real bounds
     }
     if (layer) { layer.clearLayers(); } else { layer = L.layerGroup().addTo(map); }
@@ -278,12 +327,10 @@
       counts[st.key]++;
       points.push([la, ln]);
 
-      var marker = L.circleMarker([la, ln], {
-        radius: 8,
-        color: '#ffffff',
-        weight: 2,
-        fillColor: COLOR[st.key],
-        fillOpacity: 0.95
+      var marker = L.marker([la, ln], {
+        icon: pinIcon(st.key),
+        riseOnHover: true,
+        title: ''
       });
 
       var b = st.booking;
