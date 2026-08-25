@@ -2034,3 +2034,19 @@
   // Promote the dispatch console to the canonical Daily Ops tab.
   window.renderOps = render;
 })();
+
+/* Load the Apartments Map tab. Kept as a separate file for clarity; loading it
+   from here means the release patch chain (which already injects this script)
+   does not need a new entry, and index.html stays byte-identical.
+   Guarded: this file is also executed in test harnesses with a partial DOM,
+   and a missing browser API here must never stop the dispatch board loading. */
+(function () {
+  try {
+    if (typeof document === 'undefined' || !document.createElement || !document.head) return;
+    if (document.querySelector && document.querySelector('script[data-amap]')) return;
+    var s = document.createElement('script');
+    s.src = '/fe/apartments-map.js';
+    if (s.setAttribute) s.setAttribute('data-amap', '1');
+    document.head.appendChild(s);
+  } catch (e) { /* map tab is optional — never break the board over it */ }
+})();

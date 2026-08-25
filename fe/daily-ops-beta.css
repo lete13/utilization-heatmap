@@ -2030,3 +2030,57 @@
 /* hover/pressed states a step lighter so the press is still felt */
 #tab-ops .ob-filter.on:hover { background: #1b2f45; border-color: #1b2f45; }
 #tab-ops .ob-btn.ob-primary:hover { background: #1b2f45; border-color: #1b2f45; }
+
+/* ── Apartments Map tab ────────────────────────────────────────────────────
+   Lives here rather than in its own stylesheet so the release patch chain
+   (which injects exactly one extra <link>) does not need to change. */
+#tab-map { background: var(--ob-canvas, #f5f5f2); }
+.amap-wrap { max-width: 1400px; margin: 0 auto; padding: 20px 22px 40px; }
+.amap-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  flex-wrap: wrap; gap: 12px; margin-bottom: 14px;
+}
+.amap-title { margin: 0; font-size: 20px; font-weight: 700; color: #16283a; letter-spacing: -.01em; }
+.amap-sub { font-size: 12.5px; color: #626967; margin-top: 3px; max-width: 640px; }
+.amap-controls { display: flex; align-items: center; gap: 8px; }
+.amap-lbl { font-size: 11px; font-weight: 600; color: #888b87; text-transform: uppercase; letter-spacing: .04em; }
+.amap-input {
+  font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 9px;
+  border: 1px solid rgba(0,0,0,.12); background: #fff; color: #16283a; outline: none;
+}
+.amap-input:focus { border-color: #0f1e2e; }
+.amap-btn {
+  font: inherit; font-size: 12.5px; font-weight: 600; padding: 7px 14px; border-radius: 9px;
+  border: 1px solid #0f1e2e; background: #0f1e2e; color: #fff; cursor: pointer;
+}
+.amap-btn:hover { background: #1b2f45; }
+
+.amap-legend { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px; color: #626967; }
+.amap-lg { display: inline-flex; align-items: center; gap: 6px; }
+.amap-lg i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0,0,0,.08); }
+.amap-lg b { color: #16283a; font-weight: 700; }
+.amap-lg-muted i { background: #b9bec4; }
+
+.amap-canvas {
+  height: 68vh; min-height: 420px; border-radius: 14px; overflow: hidden;
+  box-shadow: 0 1px 2px rgba(60,50,30,.05), 0 4px 18px rgba(60,50,30,.06);
+  background: #e9e7e2;
+}
+.amap-error { padding: 28px; text-align: center; color: #9c362d; font-size: 13px; }
+.amap-missing { margin-top: 10px; font-size: 11.5px; color: #888b87; line-height: 1.6; }
+.amap-missing b { color: #16283a; }
+
+/* tooltip: readable card rather than the default pale bubble */
+.leaflet-tooltip.amap-tooltip {
+  background: #ffffff; border: 1px solid rgba(0,0,0,.10); border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(22,40,58,.16); padding: 8px 11px; color: #16283a;
+}
+.leaflet-tooltip.amap-tooltip::before { border-top-color: #ffffff; }
+.amap-tip-name { font-size: 12.5px; font-weight: 700; margin-bottom: 2px; }
+.amap-tip-status { font-size: 11.5px; font-weight: 700; }
+.amap-tip-line { font-size: 11px; color: #626967; margin-top: 2px; }
+.amap-tip-city { font-size: 10.5px; color: #888b87; margin-top: 3px; }
+.amap-tip-cap { font-size: 11.5px; color: #16283a; margin-top: 3px; }
+.amap-tip-cap b { font-weight: 700; }
+.amap-tip-cap span { color: #888b87; font-weight: 400; }
+.amap-tip-cap-none { color: #b9915a; font-style: italic; }
