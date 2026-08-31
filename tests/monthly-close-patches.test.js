@@ -14,7 +14,7 @@ let html = origHtml;
 // Each file starts where the previous one ended, so a release is a small new
 // file rather than a rewrite of one ever-growing patches.json.
 const chainFiles = ['patches.json'];
-for (let n = 2; n <= 140; n++) {
+for (let n = 2; n <= 160; n++) {
   const f = path.join(root, 'fe', `patches-${n}.json`);
   if (!fs.existsSync(f)) break;
   chainFiles.push(`patches-${n}.json`);
@@ -255,7 +255,7 @@ assert.strictEqual(stepCtx.S.moOverride['a1::2026-07-01::2026-07-31'], 2, 'a1 mo
 
 // ── Server patches (srv/patches.json → server.js), mirroring srv-boot.js ─────
 const srvChain = ['patches.json'];
-for (let n = 2; n <= 140; n++) {
+for (let n = 2; n <= 160; n++) {
   if (!fs.existsSync(path.join(root, 'srv', `patches-${n}.json`))) break;
   srvChain.push(`patches-${n}.json`);
 }
@@ -372,5 +372,14 @@ const keptHotel = mergeCtx.mergeAptsProtect(
   [{ id: 'h', name: 'Horizon', bookingHotelId: '' }]
 );
 assert.strictEqual(keptHotel[0].bookingHotelId, '10980606', 'incoming empty bookingHotelId does not drop the Booking id');
+
+assert(html.includes('function mcFillOne(aptId, month)'), 'calendar-fill helper shipped');
+assert(html.includes('function mcReady(a, month)'), 'ready-to-clear helper shipped');
+assert(html.includes('class="mcbadge ready'), 'Ready to clear badge markup');
+assert(html.includes("['ready', 'Ready to clear']"), 'List filter includes Ready to clear');
+assert(html.includes('window.mcGoMonth'), 'banner can open the upcoming month');
+assert(html.includes('mc-readybanner'), 'upcoming-month banner class');
+assert(html.includes('MC_READY_FROM_DAY = 20'), 'banner from the 20th');
+assert(srv.includes('cn <= 160'), 'FE bootstrap walks through 160');
 
 console.log(`monthly-close patches OK: ${patchCount} patches in ${chainFiles.length} chain file(s), ${scripts.length} scripts, ${declared.length} declared checks, ${sha}; server: ${srvCount} patches in ${srvChain.length} chain file(s), ${srvSha}`);

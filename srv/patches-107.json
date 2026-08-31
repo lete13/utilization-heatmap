@@ -1,0 +1,19 @@
+{
+ "baseSha256": "8c6cb0d92049d3d9891862079e836f32c78432f7954004fd471608ba87b6176f",
+ "expectedSha256": "33671e666df1cdcb69cf47ad1666fd89420c045c0eda12b9c6bb3af1895415a0",
+ "patches": [
+  {
+   "note": "FE bootstrap through patches-160 so FE 141 applies",
+   "find": "for (let cn = 2; cn <= 140; cn++) { /* legacy note: cn <= 40 */ /* cn <= 80 */ /* cn <= 90 */ /* cn <= 100 */ /* cn <= 120 */",
+   "replace": "for (let cn = 2; cn <= 160; cn++) { /* legacy note: cn <= 40 */ /* cn <= 80 */ /* cn <= 90 */ /* cn <= 100 */ /* cn <= 120 */ /* cn <= 140 */",
+   "count": 1
+  }
+ ],
+ "builtAt": "2026-08-31 FE chain through 160 (ready-to-clear badge)",
+ "assertions": [
+  {
+   "has": "cn <= 160",
+   "note": "FE bootstrap through 160"
+  }
+ ]
+}
