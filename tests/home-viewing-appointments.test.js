@@ -42,7 +42,7 @@ const srv88 = JSON.parse(fs.readFileSync(path.join(root, 'srv', 'patches-88.json
 assert.strictEqual(fe124.baseSha256, fe123.expectedSha256, 'FE 124 continues FE 123');
 assert.strictEqual(srv88.baseSha256, srv87.expectedSha256, 'SRV 88 continues SRV 87');
 
-const fe = applyKind('fe', 140);
+const fe = applyKind('fe', 160);
 const srv = applyKind('srv', 100);
 assert(fe.files.includes('patches-124.json'), 'FE 124 is in the chain');
 assert(srv.files.includes('patches-88.json'), 'SRV 88 is in the chain');
