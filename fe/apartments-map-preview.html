@@ -241,8 +241,39 @@ body{margin:0;background:#f5f5f2;font-family:Inter,system-ui,-apple-system,sans-
 .amap-capnote { font-size: 11px; color: #98a0a6; }
 .amap-capnote-warn { color: #b9915a; font-weight: 600; }
 
+/* the apartment picker gets its own row so it cannot be missed or squeezed
+   out of the header on a narrow window */
+.amap-pickbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: #fff; border: 1px solid rgba(0,0,0,.07); border-radius: 11px;
+  padding: 10px 14px; margin-bottom: 12px;
+  box-shadow: 0 1px 2px rgba(60,50,30,.05);
+}
+.amap-pickbar .amap-pick { min-width: 280px; }
+.amap-pickhint { font-size: 11.5px; color: #98a0a6; }
+
+/* ── Keep building tooltips inside the map ─────────────────────────────────
+   A tooltip listing several units is wide; cap it against the viewport and
+   let a long unit list scroll rather than run off the map. */
+.leaflet-tooltip.amap-tooltip {
+  max-width: min(330px, 78vw);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.amap-tip-multi { min-width: 0; width: 100%; }
+.amap-tip-units {
+  max-height: 210px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* a slim scrollbar so a tall building does not look broken */
+.amap-tip-units::-webkit-scrollbar { width: 6px; }
+.amap-tip-units::-webkit-scrollbar-thumb { background: rgba(22,40,58,.18); border-radius: 3px; }
+.amap-tip-unit-top { flex-wrap: wrap; row-gap: 2px; }
+.amap-tip-unit-name { min-width: 0; overflow-wrap: anywhere; }
+
 </style></head><body>
-<div class="banner">PREVIEW — capacities loaded from the database · use the <b>“Jump to apartment…”</b> dropdown to pick one · hover a pin for all units · click two pins to measure · “Nearest 5” finds bigger places nearby</div>
+<div class="banner">PREVIEW — buildings sit on the <b>far edges on purpose</b>: hover the west, east and north pins and the tooltip is pushed back inside the map instead of being cut. The north tower has 5 units, so its list scrolls.</div>
 <div id="tab-ops" class="tab-panel"></div>
 
 <script>
@@ -252,43 +283,38 @@ function parseD(v){if(!v)return null;const s=String(v).trim();
  if(m)return new Date(m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'));
  const d=new Date(s);return isNaN(d)?null:d;}
 function isRevenueBooking(b){return !BLOCK_NAMES.includes(String(b.guestName||'').toLowerCase().trim());}
-// simulates the Postgres rental_info table served by /api/rental-info
-const DB_RENTAL_INFO={
- v1:{houseRules:{maximum_guests:'4',base_capacity:'2'}},
- v2:{houseRules:{maximum_guests:'6',base_capacity:'4'}},
- v3:{houseRules:{maximum_guests:'2',base_capacity:'2'}},
- av1:{houseRules:{maximum_guests:'5',base_capacity:'3'}},
- av2:{houseRules:{maximum_guests:'4',base_capacity:'4'}},
- av3:{houseRules:{maximum_guests:'3',base_capacity:'2'}},
- a1:{houseRules:{maximum_guests:'4',base_capacity:'2'}},
- a2:{houseRules:{maximum_guests:'6',base_capacity:'4'}},
- a3:{houseRules:{maximum_guests:'8',base_capacity:'6'}},
- a4:{houseRules:{maximum_guests:'2',base_capacity:'2'}}
-};
+const DB={};
+['w1','w2','w3','w4','e1','e2','e3','n1','n2','n3','n4','n5','c1'].forEach(function(id,i){
+  DB[id]={houseRules:{maximum_guests:String(2+(i%6)),base_capacity:String(2+(i%4))}};
+});
 const S={apts:[
- {id:'v1',name:'Votsala 1 Luxury Stay with Patio',lat:37.9480,lng:23.6430,city:'Piraeus'},
- {id:'v2',name:'Votsala 2 Luxury Stay with Patio',lat:37.94802,lng:23.64301,city:'Piraeus'},
- {id:'v3',name:'Votsala 3 Deluxe Apartment',lat:37.9480,lng:23.6430,city:'Piraeus'},
- {id:'av1',name:'The Athenian Veranda',lat:37.9760,lng:23.7290,city:'Athens'},
- {id:'av2',name:'The Athenian Veranda 2',lat:37.9760,lng:23.7290,city:'Athens'},
- {id:'av3',name:'The Athenian Veranda 3',lat:37.97601,lng:23.72902,city:'Athens'},
- {id:'a1',name:'Vista Acropolis',lat:37.9715,lng:23.7267,city:'Athens'},
- {id:'a2',name:'The Athenian Cedar',lat:37.9838,lng:23.7275,city:'Athens'},
- {id:'a3',name:'Le Plaza Thessaloniki',lat:40.6330,lng:22.9410,city:'Thessaloniki'},
- {id:'a4',name:'Pixie Studio Athens',lat:38.0080,lng:23.7830,city:'Psichiko'},
- {id:'nc',name:'No Coords Studio'}
+ // west edge — 3 units
+ {id:'w1',name:'Votsala 1 Luxury Stay with Patio',lat:37.9500,lng:23.5600,city:'Piraeus'},
+ {id:'w2',name:'Votsala 2 Luxury Stay with Patio',lat:37.9500,lng:23.5600,city:'Piraeus'},
+ {id:'w3',name:'Votsala 3 Deluxe Apartment',lat:37.95001,lng:23.56001,city:'Piraeus'},
+ {id:'w4',name:'Votsala 4 Garden Suite',lat:37.9500,lng:23.5600,city:'Piraeus'},
+ // east edge — 3 units
+ {id:'e1',name:'The Athenian Veranda',lat:37.9800,lng:23.9200,city:'Athens'},
+ {id:'e2',name:'The Athenian Veranda 2',lat:37.9800,lng:23.9200,city:'Athens'},
+ {id:'e3',name:'The Athenian Veranda 3',lat:37.98001,lng:23.92001,city:'Athens'},
+ // north edge — 5 units (tests scrolling)
+ {id:'n1',name:'Elysian Tower A1',lat:38.0900,lng:23.7500,city:'Kifisia'},
+ {id:'n2',name:'Elysian Tower A2',lat:38.0900,lng:23.7500,city:'Kifisia'},
+ {id:'n3',name:'Elysian Tower A3',lat:38.0900,lng:23.7500,city:'Kifisia'},
+ {id:'n4',name:'Elysian Tower A4',lat:38.09001,lng:23.75001,city:'Kifisia'},
+ {id:'n5',name:'Elysian Tower A5',lat:38.0900,lng:23.7500,city:'Kifisia'},
+ {id:'c1',name:'Vista Acropolis',lat:37.9715,lng:23.7267,city:'Athens'}
 ],bks:[
- {aptId:'v2',guestName:'Maria K.',guests:5,checkIn:'20/08/2026',checkOut:'26/08/2026'},
- {aptId:'v3',guestName:'Blocked',checkIn:'21/08/2026',checkOut:'28/08/2026'},
- {aptId:'av1',guestName:'John Smith',guests:4,checkIn:'22/08/2026',checkOut:'25/08/2026'},
- {aptId:'a2',guestName:'Anna P.',guests:5,checkIn:'23/08/2026',checkOut:'27/08/2026'},
- {aptId:'a4',guestName:'Maintenance',checkIn:'23/08/2026',checkOut:'24/08/2026'}
+ {aptId:'w2',guestName:'Maria Konstantinidou',guests:5,checkIn:'20/08/2026',checkOut:'26/08/2026'},
+ {aptId:'w3',guestName:'Blocked',checkIn:'21/08/2026',checkOut:'28/08/2026'},
+ {aptId:'e1',guestName:'John Smith',guests:4,checkIn:'22/08/2026',checkOut:'25/08/2026'},
+ {aptId:'n2',guestName:'Anna Papadopoulou',guests:3,checkIn:'23/08/2026',checkOut:'27/08/2026'},
+ {aptId:'n4',guestName:'Maintenance',checkIn:'23/08/2026',checkOut:'24/08/2026'}
 ]};
 function showTab(n,b){}
-// the map fetches capacities from the database on open
 window.fetch=function(u){
   if(String(u).indexOf('rental-info')>=0)
-    return Promise.resolve({ok:true,json:()=>Promise.resolve(DB_RENTAL_INFO)});
+    return Promise.resolve({ok:true,json:()=>Promise.resolve(DB)});
   return Promise.reject(new Error('no'));
 };
 </script>
@@ -495,9 +521,36 @@ window.fetch=function(u){
     return 'blocked';
   }
 
-  // Tooltip for one pin. A single unit reads as before; a building lists every
-  // unit at that address with its own status and capacity, so nothing stays
-  // hidden behind an overlapping pin.
+  // Leaflet anchors a tooltip to its marker and lets it hang off the edge of
+  // the map. A building tooltip listing several units is wide enough that this
+  // happens often, so once it is open we nudge it back inside the container.
+  function keepTooltipInside(tooltip) {
+    if (!tooltip || !map) return;
+    var el = tooltip.getElement && tooltip.getElement();
+    var box = map.getContainer();
+    if (!el || !box) return;
+
+    // clear a previous nudge before measuring again
+    el.style.marginLeft = '';
+    el.style.marginTop = '';
+
+    // measure after the browser has laid the tooltip out
+    requestAnimationFrame(function () {
+      var t = el.getBoundingClientRect();
+      var b = box.getBoundingClientRect();
+      var pad = 8;
+      var dx = 0, dy = 0;
+
+      if (t.left < b.left + pad) dx = (b.left + pad) - t.left;
+      else if (t.right > b.right - pad) dx = (b.right - pad) - t.right;
+
+      // if it would run off the top, flip it under the pin instead
+      if (t.top < b.top + pad) dy = (t.height + 34);
+
+      if (dx) el.style.marginLeft = Math.round(dx) + 'px';
+      if (dy) el.style.marginTop = Math.round(dy) + 'px';
+    });
+  }
   function tooltipHtml(g, when) {
     if (g.units.length === 1) {
       var apt = g.units[0];
@@ -881,11 +934,15 @@ window.fetch=function(u){
             '<div class="amap-sub">Every property with coordinates, coloured by whether it is free at the moment you pick.</div>' +
           '</div>' +
           '<div class="amap-controls">' +
-            '<select id="amap-pick" class="amap-input amap-pick"><option value="">Jump to apartment…</option></select>' +
             '<label class="amap-lbl" for="amap-when">Status at</label>' +
             '<input type="datetime-local" id="amap-when" class="amap-input">' +
             '<button type="button" id="amap-now" class="amap-btn">Now</button>' +
           '</div>' +
+        '</div>' +
+        '<div class="amap-pickbar">' +
+          '<label class="amap-lbl" for="amap-pick">Apartment</label>' +
+          '<select id="amap-pick" class="amap-input amap-pick"><option value="">Jump to apartment…</option></select>' +
+          '<span class="amap-pickhint">Pick one to centre the map on it and start a measurement.</span>' +
         '</div>' +
         '<div class="amap-legend">' +
           '<span class="amap-lg"><i style="background:' + COLOR.free + '"></i>Available <b id="amap-n-free">0</b></span>' +
@@ -1046,6 +1103,7 @@ window.fetch=function(u){
       marker.bindTooltip(tooltipHtml(g, when), {
         direction: 'top', opacity: 1, className: 'amap-tooltip'
       });
+      marker.on('tooltipopen', function (ev) { keepTooltipInside(ev.tooltip); });
       marker.addTo(layer);
     });
 

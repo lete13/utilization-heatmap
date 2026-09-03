@@ -200,9 +200,36 @@
     return 'blocked';
   }
 
-  // Tooltip for one pin. A single unit reads as before; a building lists every
-  // unit at that address with its own status and capacity, so nothing stays
-  // hidden behind an overlapping pin.
+  // Leaflet anchors a tooltip to its marker and lets it hang off the edge of
+  // the map. A building tooltip listing several units is wide enough that this
+  // happens often, so once it is open we nudge it back inside the container.
+  function keepTooltipInside(tooltip) {
+    if (!tooltip || !map) return;
+    var el = tooltip.getElement && tooltip.getElement();
+    var box = map.getContainer();
+    if (!el || !box) return;
+
+    // clear a previous nudge before measuring again
+    el.style.marginLeft = '';
+    el.style.marginTop = '';
+
+    // measure after the browser has laid the tooltip out
+    requestAnimationFrame(function () {
+      var t = el.getBoundingClientRect();
+      var b = box.getBoundingClientRect();
+      var pad = 8;
+      var dx = 0, dy = 0;
+
+      if (t.left < b.left + pad) dx = (b.left + pad) - t.left;
+      else if (t.right > b.right - pad) dx = (b.right - pad) - t.right;
+
+      // if it would run off the top, flip it under the pin instead
+      if (t.top < b.top + pad) dy = (t.height + 34);
+
+      if (dx) el.style.marginLeft = Math.round(dx) + 'px';
+      if (dy) el.style.marginTop = Math.round(dy) + 'px';
+    });
+  }
   function tooltipHtml(g, when) {
     if (g.units.length === 1) {
       var apt = g.units[0];
@@ -586,11 +613,15 @@
             '<div class="amap-sub">Every property with coordinates, coloured by whether it is free at the moment you pick.</div>' +
           '</div>' +
           '<div class="amap-controls">' +
-            '<select id="amap-pick" class="amap-input amap-pick"><option value="">Jump to apartment…</option></select>' +
             '<label class="amap-lbl" for="amap-when">Status at</label>' +
             '<input type="datetime-local" id="amap-when" class="amap-input">' +
             '<button type="button" id="amap-now" class="amap-btn">Now</button>' +
           '</div>' +
+        '</div>' +
+        '<div class="amap-pickbar">' +
+          '<label class="amap-lbl" for="amap-pick">Apartment</label>' +
+          '<select id="amap-pick" class="amap-input amap-pick"><option value="">Jump to apartment…</option></select>' +
+          '<span class="amap-pickhint">Pick one to centre the map on it and start a measurement.</span>' +
         '</div>' +
         '<div class="amap-legend">' +
           '<span class="amap-lg"><i style="background:' + COLOR.free + '"></i>Available <b id="amap-n-free">0</b></span>' +
@@ -751,6 +782,7 @@
       marker.bindTooltip(tooltipHtml(g, when), {
         direction: 'top', opacity: 1, className: 'amap-tooltip'
       });
+      marker.on('tooltipopen', function (ev) { keepTooltipInside(ev.tooltip); });
       marker.addTo(layer);
     });
 
