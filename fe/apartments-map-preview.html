@@ -252,26 +252,44 @@ body{margin:0;background:#f5f5f2;font-family:Inter,system-ui,-apple-system,sans-
 .amap-pickbar .amap-pick { min-width: 280px; }
 .amap-pickhint { font-size: 11.5px; color: #98a0a6; }
 
-/* ── Building tooltips: full information, inside the map ───────────────────
-   The tooltip is given a real width rather than a max-width so the browser
-   never collapses it into a one-letter column. Staying inside the map is
-   handled by choosing the side before opening (see apartments-map.js). */
-.leaflet-tooltip.amap-tooltip {
-  white-space: normal;
-  width: max-content;
-  max-width: none;
+/* ── Map + details panel ───────────────────────────────────────────────────
+   Details are printed beside the map instead of in a floating tooltip: a
+   building with several units gets real room, and nothing can be clipped by
+   the edge of the map. */
+.amap-stage { display: flex; gap: 14px; align-items: stretch; }
+.amap-stage .amap-canvas { flex: 1 1 auto; min-width: 0; }
+.amap-side {
+  flex: 0 0 300px; width: 300px;
+  background: #fff; border: 1px solid rgba(0,0,0,.07); border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(60,50,30,.05), 0 4px 18px rgba(60,50,30,.06);
+  padding: 14px 16px; overflow-y: auto; max-height: 68vh;
 }
-/* a single flat: let it size to its content, it is short anyway */
-.amap-tip { width: max-content; max-width: 300px; }
-/* a building: fixed comfortable width so every unit row lines up */
-.amap-tip-multi { width: 290px; max-width: 290px; }
-/* a tall building scrolls instead of running past the bottom of the map */
-.amap-tip-units { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
-.amap-tip-units::-webkit-scrollbar { width: 6px; }
-.amap-tip-units::-webkit-scrollbar-thumb { background: rgba(22,40,58,.18); border-radius: 3px; }
+.amap-side-head {
+  font-size: 10.5px; font-weight: 700; color: #98a0a6;
+  text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px;
+}
+.amap-side-empty { font-size: 12px; color: #98a0a6; line-height: 1.6; }
+.amap-side-empty-t { font-size: 13px; font-weight: 600; color: #626967; margin-bottom: 4px; }
+/* the detail card fills the panel now, so no fixed tooltip width */
+.amap-side .amap-tip, .amap-side .amap-tip-multi { width: auto; max-width: none; min-width: 0; }
+.amap-side .amap-tip-units { max-height: none; overflow: visible; }
+@media (max-width: 900px) {
+  .amap-stage { flex-direction: column; }
+  .amap-side { flex: 1 1 auto; width: auto; max-height: none; }
+}
+
+/* category headings inside the options list */
+.amap-near-cat {
+  font-size: 10px; font-weight: 700; color: #98a0a6;
+  text-transform: uppercase; letter-spacing: .05em;
+  margin: 8px 0 2px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,.05);
+}
+.amap-near-cat:first-of-type { border-top: none; padding-top: 0; margin-top: 2px; }
+.amap-near-rank-same { background: #e7f2ec; color: #2e9e6b; }
+.amap-near-km-same { background: #e7f2ec; color: #2e7d5b; font-size: 10.5px; }
 
 </style></head><body>
-<div class="banner">PREVIEW — hover <b>Votsala</b> (3 units) or <b>The Athenian Veranda</b> (3 units): the box now has a proper width, shows the full information, and opens on the side that has room</div>
+<div class="banner">PREVIEW — details now print in the <b>panel on the right</b> (no floating boxes) · hover <b>Votsala</b> or <b>Athenian Veranda</b> · click one, then “Nearest 5” to see <b>Same building</b> and <b>Nearby buildings</b> separately</div>
 <div id="tab-ops" class="tab-panel"></div>
 
 <script>
@@ -281,29 +299,36 @@ function parseD(v){if(!v)return null;const s=String(v).trim();
  if(m)return new Date(m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'));
  const d=new Date(s);return isNaN(d)?null:d;}
 function isRevenueBooking(b){return !BLOCK_NAMES.includes(String(b.guestName||'').toLowerCase().trim());}
-const DB={};
-['w1','w2','w3','e1','e2','e3','n1','n2','n3','c1','c2'].forEach(function(id,i){
-  DB[id]={houseRules:{maximum_guests:String(2+(i%6)),base_capacity:String(2+(i%4))}};
-});
+const DB={
+ v1:{houseRules:{maximum_guests:'4',base_capacity:'2'}},
+ v2:{houseRules:{maximum_guests:'6',base_capacity:'4'}},
+ v3:{houseRules:{maximum_guests:'5',base_capacity:'3'}},
+ e1:{houseRules:{maximum_guests:'5',base_capacity:'3'}},
+ e2:{houseRules:{maximum_guests:'4',base_capacity:'4'}},
+ e3:{houseRules:{maximum_guests:'6',base_capacity:'4'}},
+ c1:{houseRules:{maximum_guests:'4',base_capacity:'2'}},
+ c2:{houseRules:{maximum_guests:'6',base_capacity:'4'}},
+ t1:{houseRules:{maximum_guests:'8',base_capacity:'6'}},
+ p1:{houseRules:{maximum_guests:'2',base_capacity:'2'}}
+};
 const S={apts:[
- {id:'w1',name:'Votsala 1 Luxury Stay with Patio',lat:37.9480,lng:23.6430,city:'Piraeus'},
- {id:'w2',name:'Votsala 2 Luxury Stay with Patio',lat:37.9480,lng:23.6430,city:'Piraeus'},
- {id:'w3',name:'Votsala 3 Deluxe Apartment',lat:37.94801,lng:23.64301,city:'Piraeus'},
+ {id:'v1',name:'Votsala 1 Luxury Stay with Patio',lat:37.9480,lng:23.6430,city:'Piraeus'},
+ {id:'v2',name:'Votsala 2 Luxury Stay with Patio',lat:37.9480,lng:23.6430,city:'Piraeus'},
+ {id:'v3',name:'Votsala 3 Deluxe Apartment',lat:37.94801,lng:23.64301,city:'Piraeus'},
  {id:'e1',name:'The Athenian Veranda',lat:37.9760,lng:23.7290,city:'Athens'},
  {id:'e2',name:'The Athenian Veranda 2',lat:37.9760,lng:23.7290,city:'Athens'},
  {id:'e3',name:'The Athenian Veranda 3',lat:37.97601,lng:23.72902,city:'Athens'},
- {id:'n1',name:'Elysian Cornerstone',lat:40.6330,lng:22.9410,city:'Thessaloniki'},
- {id:'n2',name:'Le Grace Urban Retreat',lat:40.6210,lng:22.9530,city:'Thessaloniki'},
- {id:'n3',name:'Pixie Studio Athens',lat:38.0080,lng:23.7830,city:'Psichiko'},
  {id:'c1',name:'Vista Acropolis',lat:37.9715,lng:23.7267,city:'Athens'},
  {id:'c2',name:'The Athenian Cedar',lat:37.9838,lng:23.7275,city:'Athens'},
+ {id:'t1',name:'Le Plaza Thessaloniki',lat:40.6330,lng:22.9410,city:'Thessaloniki'},
+ {id:'p1',name:'Pixie Studio Athens',lat:38.0080,lng:23.7830,city:'Psichiko'},
  {id:'nc',name:'No Coords Studio'}
 ],bks:[
- {aptId:'w2',guestName:'Maria Konstantinidou',guests:5,checkIn:'20/08/2026',checkOut:'26/08/2026'},
- {aptId:'w3',guestName:'Blocked',checkIn:'21/08/2026',checkOut:'28/08/2026'},
+ {aptId:'v2',guestName:'Maria Konstantinidou',guests:5,checkIn:'20/08/2026',checkOut:'26/08/2026'},
+ {aptId:'v3',guestName:'Blocked',checkIn:'21/08/2026',checkOut:'28/08/2026'},
  {aptId:'e1',guestName:'John Smith',guests:4,checkIn:'22/08/2026',checkOut:'25/08/2026'},
  {aptId:'c2',guestName:'Anna Papadopoulou',guests:5,checkIn:'23/08/2026',checkOut:'27/08/2026'},
- {aptId:'n3',guestName:'Maintenance',checkIn:'23/08/2026',checkOut:'24/08/2026'}
+ {aptId:'p1',guestName:'Maintenance',checkIn:'23/08/2026',checkOut:'24/08/2026'}
 ]};
 function showTab(n,b){}
 window.fetch=function(u){
@@ -396,14 +421,23 @@ window.fetch=function(u){
 
   // The five closest properties that could host the same party — same
   // capacity or larger. Used when a stay has to be moved somewhere else.
+  // Two answers to "where else could this party go?":
+  //   • other units in the same building — no travel at all, so they lead
+  //   • the closest other buildings that are big enough
   function nearestBigEnough(origin, limit) {
     var need = groupCapacity(origin);
     var oc = { lat: origin.lat, lng: origin.lng };
 
-    return buildGroups().groups
+    var sameBuilding = origin.units.filter(function (u) {
+      if (need == null) return true;
+      var c = capNumber(u);
+      return c != null && c >= need;
+    });
+
+    var others = buildGroups().groups
       .filter(function (g) {
         if (g.key === origin.key) return false;
-        if (need == null) return true;          // nothing to compare against
+        if (need == null) return true;
         var c = groupCapacity(g);
         return c != null && c >= need;
       })
@@ -412,6 +446,8 @@ window.fetch=function(u){
       })
       .sort(function (x, y) { return x.km - y.km; })
       .slice(0, limit || 5);
+
+    return { sameBuilding: sameBuilding, others: others };
   }
 
   function runNearestSearch() {
@@ -427,9 +463,9 @@ window.fetch=function(u){
   }
 
   function inNearList(g) {
-    if (!nearList) return false;
-    for (var i = 0; i < nearList.length; i++) {
-      if (nearList[i].group.key === g.key) return true;
+    if (!nearList || !nearList.others) return false;
+    for (var i = 0; i < nearList.others.length; i++) {
+      if (nearList.others[i].group.key === g.key) return true;
     }
     return false;
   }
@@ -515,9 +551,9 @@ window.fetch=function(u){
     return 'blocked';
   }
 
-  // Tooltip for one pin. A single unit reads as before; a building lists every
-  // unit at that address with its own status and capacity.
-  function tooltipHtml(g, when) {
+  // What the side panel shows while a pin is hovered, or for the pin that is
+  // currently selected. A building lists every unit at that address.
+  function detailsHtml(g, when) {
     if (g.units.length === 1) {
       var apt = g.units[0];
       var st = statusOf(apt, when);
@@ -582,6 +618,30 @@ window.fetch=function(u){
       '<div class="amap-tip-units">' + g.units.map(unitRow).join('') + '</div>' +
       (g.city ? '<div class="amap-tip-city">' + esc(g.city) + '</div>' : '') +
     '</div>';
+  }
+
+  // Hovering a pin previews it; the selected pin stays shown once the mouse
+  // leaves, so the panel is never blank while you are working with a place.
+  var hovered = null;
+  function showDetails(g) {
+    hovered = g;
+    paintSide();
+  }
+
+  function paintSide() {
+    var box = byId('amap-side');
+    if (!box) return;
+    var g = hovered || selA;
+    if (!g) {
+      box.innerHTML = '<div class="amap-side-empty">' +
+        '<div class="amap-side-empty-t">Hover a pin</div>' +
+        '<div>Its availability and capacity appear here. Click to select it, ' +
+        'then click a second pin to measure the distance.</div></div>';
+      return;
+    }
+    box.innerHTML =
+      '<div class="amap-side-head">' + (hovered ? 'Hovering' : 'Selected') + '</div>' +
+      detailsHtml(g, chosenMoment());
   }
 
   // Clicking pins picks the two ends of a measurement: first click sets A,
@@ -662,14 +722,31 @@ window.fetch=function(u){
 
     if (!nearList) { box.innerHTML = ''; box.className = 'amap-near'; return; }
 
-    if (!nearList.length) {
+    var when = chosenMoment();
+    var same = nearList.sameBuilding || [];
+    var others = nearList.others || [];
+
+    if (!same.length && !others.length) {
       box.className = 'amap-near amap-near-on';
-      box.innerHTML = '<div class="amap-near-empty">No other property on the map can take that many guests.</div>';
+      box.innerHTML = '<div class="amap-near-empty">Nothing else on the map can take that many guests.</div>';
       return;
     }
 
-    var when = chosenMoment();
-    var rows = nearList.map(function (hit, i) {
+    // Other units in the same building come first: moving a party next door
+    // beats moving them across town, so they are their own category.
+    var sameRows = same.map(function (apt) {
+      var st = statusOf(apt, when);
+      var cap = capNumber(apt);
+      return '<div class="amap-near-row">' +
+        '<span class="amap-near-rank amap-near-rank-same">•</span>' +
+        '<span class="amap-near-name">' + esc(apt.name || apt.id) + '</span>' +
+        '<span class="amap-near-cap">sleeps ' + (cap == null ? '—' : cap) + '</span>' +
+        '<span class="amap-near-status" style="color:' + COLOR[st.key] + '">' + LABEL[st.key] + '</span>' +
+        '<span class="amap-near-km amap-near-km-same">same building</span>' +
+      '</div>';
+    }).join('');
+
+    var otherRows = others.map(function (hit, i) {
       var g = hit.group;
       var key = groupStatus(g, when);
       var cap = groupCapacity(g);
@@ -687,9 +764,14 @@ window.fetch=function(u){
 
     box.className = 'amap-near amap-near-on';
     box.innerHTML =
-      '<div class="amap-near-head">Closest options for <b>' + esc(selA.label) + '</b>' +
+      '<div class="amap-near-head">Options for <b>' + esc(selA.label) + '</b>' +
         '<button type="button" class="amap-near-close" id="amap-near-x">Hide</button></div>' +
-      rows;
+      (same.length
+        ? '<div class="amap-near-cat">Same building</div>' + sameRows
+        : '') +
+      (others.length
+        ? '<div class="amap-near-cat">Nearby buildings</div>' + otherRows
+        : '<div class="amap-near-empty">No other building nearby is big enough.</div>') ;
 
     var x = byId('amap-near-x');
     if (x) x.addEventListener('click', clearNearest);
@@ -919,7 +1001,10 @@ window.fetch=function(u){
         '</div>' +
         '<div id="amap-measure" class="amap-measure amap-measure-idle"></div>' +
         '<div id="amap-near" class="amap-near"></div>' +
-        '<div id="amap-canvas" class="amap-canvas"></div>' +
+        '<div class="amap-stage">' +
+          '<div id="amap-canvas" class="amap-canvas"></div>' +
+          '<aside id="amap-side" class="amap-side"></aside>' +
+        '</div>' +
         '<div id="amap-missing" class="amap-missing"></div>' +
       '</div>';
 
@@ -1066,21 +1151,11 @@ window.fetch=function(u){
       });
       marker.on('click', function () { pickForMeasure(g); });
 
-      // Open the tooltip on the side that has room. Deciding up front lets
-      // Leaflet place it normally — nudging it after it opens makes it jump.
-      var dir = 'top';
-      try {
-        var b = map.getBounds(), c = b.getCenter();
-        var latSpan = b.getNorth() - b.getSouth();
-        var lngSpan = b.getEast() - b.getWest();
-        if (g.lat > b.getNorth() - latSpan * 0.22) dir = 'bottom';   // near the top edge
-        else if (g.lng < b.getWest() + lngSpan * 0.18) dir = 'right'; // near the left edge
-        else if (g.lng > b.getEast() - lngSpan * 0.18) dir = 'left';  // near the right edge
-      } catch (e) { dir = 'top'; }
-
-      marker.bindTooltip(tooltipHtml(g, when), {
-        direction: dir, opacity: 1, className: 'amap-tooltip'
-      });
+      // Details go to the panel beside the map rather than a floating box:
+      // nothing can be clipped by the map edge, and a building with several
+      // units has room to list them all.
+      marker.on('mouseover', function () { showDetails(g); });
+      marker.on('mouseout', function () { showDetails(null); });
       marker.addTo(layer);
     });
 
@@ -1122,13 +1197,13 @@ window.fetch=function(u){
         // frame both ends so the measurement is actually visible
         map.fitBounds(L.latLngBounds([[ca.lat, ca.lng], [cb.lat, cb.lng]]).pad(0.35));
       }
-    } else if (selA && nearList && nearList.length) {
+    } else if (selA && nearList && nearList.others && nearList.others.length) {
       // spokes from the origin to each shortlisted property
       var oc = { lat: selA.lat, lng: selA.lng };
       if (oc) {
         var spokes = [];
         var frame = [[oc.lat, oc.lng]];
-        nearList.forEach(function (hit) {
+        nearList.others.forEach(function (hit) {
           var c = { lat: hit.group.lat, lng: hit.group.lng };
           spokes.push([[oc.lat, oc.lng], [c.lat, c.lng]]);
           frame.push([c.lat, c.lng]);
@@ -1144,6 +1219,7 @@ window.fetch=function(u){
     }
     renderMeasureBar();
     fillPicker();
+    paintSide();
   }
 
   // Leaflet needs a size recalculation when its container becomes visible.

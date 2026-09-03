@@ -81,14 +81,23 @@
 
   // The five closest properties that could host the same party — same
   // capacity or larger. Used when a stay has to be moved somewhere else.
+  // Two answers to "where else could this party go?":
+  //   • other units in the same building — no travel at all, so they lead
+  //   • the closest other buildings that are big enough
   function nearestBigEnough(origin, limit) {
     var need = groupCapacity(origin);
     var oc = { lat: origin.lat, lng: origin.lng };
 
-    return buildGroups().groups
+    var sameBuilding = origin.units.filter(function (u) {
+      if (need == null) return true;
+      var c = capNumber(u);
+      return c != null && c >= need;
+    });
+
+    var others = buildGroups().groups
       .filter(function (g) {
         if (g.key === origin.key) return false;
-        if (need == null) return true;          // nothing to compare against
+        if (need == null) return true;
         var c = groupCapacity(g);
         return c != null && c >= need;
       })
@@ -97,6 +106,8 @@
       })
       .sort(function (x, y) { return x.km - y.km; })
       .slice(0, limit || 5);
+
+    return { sameBuilding: sameBuilding, others: others };
   }
 
   function runNearestSearch() {
@@ -112,9 +123,9 @@
   }
 
   function inNearList(g) {
-    if (!nearList) return false;
-    for (var i = 0; i < nearList.length; i++) {
-      if (nearList[i].group.key === g.key) return true;
+    if (!nearList || !nearList.others) return false;
+    for (var i = 0; i < nearList.others.length; i++) {
+      if (nearList.others[i].group.key === g.key) return true;
     }
     return false;
   }
@@ -200,9 +211,9 @@
     return 'blocked';
   }
 
-  // Tooltip for one pin. A single unit reads as before; a building lists every
-  // unit at that address with its own status and capacity.
-  function tooltipHtml(g, when) {
+  // What the side panel shows while a pin is hovered, or for the pin that is
+  // currently selected. A building lists every unit at that address.
+  function detailsHtml(g, when) {
     if (g.units.length === 1) {
       var apt = g.units[0];
       var st = statusOf(apt, when);
@@ -267,6 +278,30 @@
       '<div class="amap-tip-units">' + g.units.map(unitRow).join('') + '</div>' +
       (g.city ? '<div class="amap-tip-city">' + esc(g.city) + '</div>' : '') +
     '</div>';
+  }
+
+  // Hovering a pin previews it; the selected pin stays shown once the mouse
+  // leaves, so the panel is never blank while you are working with a place.
+  var hovered = null;
+  function showDetails(g) {
+    hovered = g;
+    paintSide();
+  }
+
+  function paintSide() {
+    var box = byId('amap-side');
+    if (!box) return;
+    var g = hovered || selA;
+    if (!g) {
+      box.innerHTML = '<div class="amap-side-empty">' +
+        '<div class="amap-side-empty-t">Hover a pin</div>' +
+        '<div>Its availability and capacity appear here. Click to select it, ' +
+        'then click a second pin to measure the distance.</div></div>';
+      return;
+    }
+    box.innerHTML =
+      '<div class="amap-side-head">' + (hovered ? 'Hovering' : 'Selected') + '</div>' +
+      detailsHtml(g, chosenMoment());
   }
 
   // Clicking pins picks the two ends of a measurement: first click sets A,
@@ -347,14 +382,31 @@
 
     if (!nearList) { box.innerHTML = ''; box.className = 'amap-near'; return; }
 
-    if (!nearList.length) {
+    var when = chosenMoment();
+    var same = nearList.sameBuilding || [];
+    var others = nearList.others || [];
+
+    if (!same.length && !others.length) {
       box.className = 'amap-near amap-near-on';
-      box.innerHTML = '<div class="amap-near-empty">No other property on the map can take that many guests.</div>';
+      box.innerHTML = '<div class="amap-near-empty">Nothing else on the map can take that many guests.</div>';
       return;
     }
 
-    var when = chosenMoment();
-    var rows = nearList.map(function (hit, i) {
+    // Other units in the same building come first: moving a party next door
+    // beats moving them across town, so they are their own category.
+    var sameRows = same.map(function (apt) {
+      var st = statusOf(apt, when);
+      var cap = capNumber(apt);
+      return '<div class="amap-near-row">' +
+        '<span class="amap-near-rank amap-near-rank-same">•</span>' +
+        '<span class="amap-near-name">' + esc(apt.name || apt.id) + '</span>' +
+        '<span class="amap-near-cap">sleeps ' + (cap == null ? '—' : cap) + '</span>' +
+        '<span class="amap-near-status" style="color:' + COLOR[st.key] + '">' + LABEL[st.key] + '</span>' +
+        '<span class="amap-near-km amap-near-km-same">same building</span>' +
+      '</div>';
+    }).join('');
+
+    var otherRows = others.map(function (hit, i) {
       var g = hit.group;
       var key = groupStatus(g, when);
       var cap = groupCapacity(g);
@@ -372,9 +424,14 @@
 
     box.className = 'amap-near amap-near-on';
     box.innerHTML =
-      '<div class="amap-near-head">Closest options for <b>' + esc(selA.label) + '</b>' +
+      '<div class="amap-near-head">Options for <b>' + esc(selA.label) + '</b>' +
         '<button type="button" class="amap-near-close" id="amap-near-x">Hide</button></div>' +
-      rows;
+      (same.length
+        ? '<div class="amap-near-cat">Same building</div>' + sameRows
+        : '') +
+      (others.length
+        ? '<div class="amap-near-cat">Nearby buildings</div>' + otherRows
+        : '<div class="amap-near-empty">No other building nearby is big enough.</div>') ;
 
     var x = byId('amap-near-x');
     if (x) x.addEventListener('click', clearNearest);
@@ -604,7 +661,10 @@
         '</div>' +
         '<div id="amap-measure" class="amap-measure amap-measure-idle"></div>' +
         '<div id="amap-near" class="amap-near"></div>' +
-        '<div id="amap-canvas" class="amap-canvas"></div>' +
+        '<div class="amap-stage">' +
+          '<div id="amap-canvas" class="amap-canvas"></div>' +
+          '<aside id="amap-side" class="amap-side"></aside>' +
+        '</div>' +
         '<div id="amap-missing" class="amap-missing"></div>' +
       '</div>';
 
@@ -751,21 +811,11 @@
       });
       marker.on('click', function () { pickForMeasure(g); });
 
-      // Open the tooltip on the side that has room. Deciding up front lets
-      // Leaflet place it normally — nudging it after it opens makes it jump.
-      var dir = 'top';
-      try {
-        var b = map.getBounds(), c = b.getCenter();
-        var latSpan = b.getNorth() - b.getSouth();
-        var lngSpan = b.getEast() - b.getWest();
-        if (g.lat > b.getNorth() - latSpan * 0.22) dir = 'bottom';   // near the top edge
-        else if (g.lng < b.getWest() + lngSpan * 0.18) dir = 'right'; // near the left edge
-        else if (g.lng > b.getEast() - lngSpan * 0.18) dir = 'left';  // near the right edge
-      } catch (e) { dir = 'top'; }
-
-      marker.bindTooltip(tooltipHtml(g, when), {
-        direction: dir, opacity: 1, className: 'amap-tooltip'
-      });
+      // Details go to the panel beside the map rather than a floating box:
+      // nothing can be clipped by the map edge, and a building with several
+      // units has room to list them all.
+      marker.on('mouseover', function () { showDetails(g); });
+      marker.on('mouseout', function () { showDetails(null); });
       marker.addTo(layer);
     });
 
@@ -807,13 +857,13 @@
         // frame both ends so the measurement is actually visible
         map.fitBounds(L.latLngBounds([[ca.lat, ca.lng], [cb.lat, cb.lng]]).pad(0.35));
       }
-    } else if (selA && nearList && nearList.length) {
+    } else if (selA && nearList && nearList.others && nearList.others.length) {
       // spokes from the origin to each shortlisted property
       var oc = { lat: selA.lat, lng: selA.lng };
       if (oc) {
         var spokes = [];
         var frame = [[oc.lat, oc.lng]];
-        nearList.forEach(function (hit) {
+        nearList.others.forEach(function (hit) {
           var c = { lat: hit.group.lat, lng: hit.group.lng };
           spokes.push([[oc.lat, oc.lng], [c.lat, c.lng]]);
           frame.push([c.lat, c.lng]);
@@ -829,6 +879,7 @@
     }
     renderMeasureBar();
     fillPicker();
+    paintSide();
   }
 
   // Leaflet needs a size recalculation when its container becomes visible.
