@@ -2230,3 +2230,40 @@
   width: 32px; height: 32px; margin-left: -16px;
   border-radius: 50%; border: 2px dashed #0f1e2e; opacity: .3;
 }
+
+/* ── Buildings with several units on one pin ───────────────────────────────
+   One street door, several apartments: the pin carries the count and the
+   tooltip lists every unit so none is hidden underneath. */
+.amap-pin-badge {
+  position: absolute; left: 0; right: 0; top: 5px;
+  text-align: center; font-size: 11px; font-weight: 800; color: #fff;
+  line-height: 1; pointer-events: none; letter-spacing: -.02em;
+}
+.amap-tip-multi { min-width: 250px; white-space: normal; }
+.amap-tip-count {
+  font-size: 10px; font-weight: 700; color: #626967; background: #eef1f4;
+  border-radius: 999px; padding: 2px 7px; margin-left: 6px; vertical-align: middle;
+}
+.amap-tip-summary { font-size: 11px; color: #626967; margin: 2px 0 6px; }
+.amap-tip-units { border-top: 1px solid rgba(0,0,0,.07); padding-top: 4px; }
+.amap-tip-unit { padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,.045); }
+.amap-tip-unit:last-child { border-bottom: none; }
+.amap-tip-unit-top { display: flex; align-items: center; gap: 6px; }
+.amap-tip-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.amap-tip-unit-name { font-size: 11.5px; font-weight: 600; color: #16283a; flex: 1 1 auto; }
+.amap-tip-unit-cap { font-size: 10.5px; color: #888b87; }
+.amap-tip-unit-status { font-size: 10.5px; font-weight: 700; }
+.amap-tip-unit-dates { font-size: 10px; color: #98a0a6; margin-left: 13px; margin-top: 1px; }
+.amap-near-units {
+  font-size: 10px; font-weight: 700; color: #626967; background: #eef1f4;
+  border-radius: 999px; padding: 1px 6px; margin-left: 5px;
+}
+
+/* ── Apartment picker + capacity source note ───────────────────────────────*/
+.amap-pick {
+  min-width: 240px; max-width: 320px; cursor: pointer;
+  font-size: 12.5px; padding: 7px 10px;
+}
+.amap-pick:focus { border-color: #0f1e2e; }
+.amap-capnote { font-size: 11px; color: #98a0a6; }
+.amap-capnote-warn { color: #b9915a; font-weight: 600; }

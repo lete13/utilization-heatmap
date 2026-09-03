@@ -25,8 +25,13 @@
 
   // A teardrop pin drawn as inline SVG: reads as a map marker rather than a
   // dot, keeps its colour meaning, and stays crisp at every zoom level.
-  function pinIcon(kind, selected, shortlisted) {
+  function pinIcon(kind, selected, shortlisted, unitCount) {
     var fill = COLOR[kind];
+    // a building with several units carries the count, so an operator can see
+    // at a glance that one pin stands for more than one property
+    var badge = (unitCount > 1)
+      ? '<span class="amap-pin-badge">' + unitCount + '</span>'
+      : '';
     var html =
       '<div class="amap-pin amap-pin-' + kind +
         (selected ? ' amap-pin-sel' : '') +
@@ -34,8 +39,8 @@
         '<svg width="26" height="34" viewBox="0 0 26 34" xmlns="http://www.w3.org/2000/svg">' +
           '<path d="M13 33.2C13 33.2 24.6 20.9 24.6 13A11.6 11.6 0 1 0 1.4 13c0 7.9 11.6 20.2 11.6 20.2z" ' +
             'fill="' + fill + '" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round"/>' +
-          '<circle cx="13" cy="12.8" r="4.1" fill="#ffffff" fill-opacity=".92"/>' +
-        '</svg>' +
+          (unitCount > 1 ? '' : '<circle cx="13" cy="12.8" r="4.1" fill="#ffffff" fill-opacity=".92"/>') +
+        '</svg>' + badge +
       '</div>';
     return L.divIcon({
       html: html,
@@ -64,23 +69,31 @@
     return c.max != null ? c.max : c.base;
   }
 
+  // For a building, the relevant figure is the largest unit it can offer.
+  function groupCapacity(g) {
+    var best = null;
+    g.units.forEach(function (u) {
+      var n = capNumber(u);
+      if (n != null && (best == null || n > best)) best = n;
+    });
+    return best;
+  }
+
   // The five closest properties that could host the same party — same
   // capacity or larger. Used when a stay has to be moved somewhere else.
   function nearestBigEnough(origin, limit) {
-    var oc = coordsOf(origin);
-    if (!oc) return [];
-    var need = capNumber(origin);
+    var need = groupCapacity(origin);
+    var oc = { lat: origin.lat, lng: origin.lng };
 
-    return apartments()
-      .filter(function (a) {
-        if (String(a.id) === String(origin.id)) return false;
-        if (!coordsOf(a)) return false;
+    return buildGroups().groups
+      .filter(function (g) {
+        if (g.key === origin.key) return false;
         if (need == null) return true;          // nothing to compare against
-        var c = capNumber(a);
+        var c = groupCapacity(g);
         return c != null && c >= need;
       })
-      .map(function (a) {
-        return { apt: a, km: distanceKm(oc, coordsOf(a)) };
+      .map(function (g) {
+        return { group: g, km: distanceKm(oc, { lat: g.lat, lng: g.lng }) };
       })
       .sort(function (x, y) { return x.km - y.km; })
       .slice(0, limit || 5);
@@ -98,10 +111,10 @@
     draw();
   }
 
-  function inNearList(apt) {
+  function inNearList(g) {
     if (!nearList) return false;
     for (var i = 0; i < nearList.length; i++) {
-      if (String(nearList[i].apt.id) === String(apt.id)) return true;
+      if (nearList[i].group.key === g.key) return true;
     }
     return false;
   }
@@ -122,13 +135,148 @@
     return (isFinite(la) && isFinite(ln)) ? { lat: la, lng: ln } : null;
   }
 
+  // Several units often share one street door (Votsala 1/2/3, Veranda 1/2/3).
+  // Stacking a pin per unit hides all but the top one, so pins are grouped by
+  // location and the tooltip lists every unit at that address.
+  // ~4 decimals ≈ 11 m, close enough to catch units the channel geocoded to
+  // slightly different points in the same building.
+  function locationKey(c) {
+    return c.lat.toFixed(4) + ',' + c.lng.toFixed(4);
+  }
+
+  function buildGroups() {
+    var groups = [];
+    var index = {};
+    var missing = [];
+
+    apartments().forEach(function (apt) {
+      var c = coordsOf(apt);
+      if (!c) { missing.push(apt.name || apt.id || '—'); return; }
+      var key = locationKey(c);
+      if (!index[key]) {
+        index[key] = { key: key, lat: c.lat, lng: c.lng, units: [] };
+        groups.push(index[key]);
+      }
+      index[key].units.push(apt);
+    });
+
+    groups.forEach(function (g) {
+      g.units.sort(function (a, b) {
+        return String(a.name || '').localeCompare(String(b.name || ''), 'el', { numeric: true });
+      });
+      // a group is "available" if anything in it is free — that is the thing
+      // an operator is scanning for; otherwise reserved beats blocked.
+      g.label = g.units.length === 1
+        ? (g.units[0].name || g.units[0].id || '—')
+        : buildingLabel(g.units);
+      g.city = g.units[0].city || '';
+    });
+
+    return { groups: groups, missing: missing };
+  }
+
+  // "Votsala 1 Luxury Stay" + "Votsala 2 Luxury Stay" → "Votsala"
+  function buildingLabel(units) {
+    var names = units.map(function (u) { return String(u.name || ''); });
+    var first = names[0].split(/\s+/);
+    var common = [];
+    for (var i = 0; i < first.length; i++) {
+      var word = first[i];
+      var everyone = names.every(function (n) { return n.split(/\s+/)[i] === word; });
+      if (!everyone) break;
+      common.push(word);
+    }
+    var label = common.join(' ').replace(/[,\-–|]+$/, '').trim();
+    return label || (names[0] + ' + ' + (units.length - 1) + ' more');
+  }
+
+  // Status for a whole group: free wins (that is what you are hunting for),
+  // then reserved, then blocked.
+  function groupStatus(group, when) {
+    var any = { free: false, booked: false, blocked: false };
+    group.units.forEach(function (u) { any[statusOf(u, when).key] = true; });
+    if (any.free) return 'free';
+    if (any.booked) return 'booked';
+    return 'blocked';
+  }
+
+  // Tooltip for one pin. A single unit reads as before; a building lists every
+  // unit at that address with its own status and capacity, so nothing stays
+  // hidden behind an overlapping pin.
+  function tooltipHtml(g, when) {
+    if (g.units.length === 1) {
+      var apt = g.units[0];
+      var st = statusOf(apt, when);
+      var cap = capacityOf(apt);
+      var capLine;
+      if (cap.max != null) {
+        capLine = '<div class="amap-tip-cap">Sleeps up to <b>' + cap.max + '</b>' +
+          (cap.base != null && cap.base !== cap.max ? ' <span>(' + cap.base + ' beds + sofa)</span>' : '') + '</div>';
+      } else if (cap.base != null) {
+        capLine = '<div class="amap-tip-cap">Base capacity <b>' + cap.base + '</b></div>';
+      } else {
+        capLine = '<div class="amap-tip-cap amap-tip-cap-none">Capacity not set</div>';
+      }
+
+      var b = st.booking, detail = '', guestsLine = '';
+      if (b) {
+        detail = '<div class="amap-tip-line">' + fmt(pd(b.checkIn)) + ' → ' + fmt(pd(b.checkOut)) + '</div>';
+        if (st.key === 'booked' && b.guestName) {
+          detail += '<div class="amap-tip-line">' + esc(b.guestName) + '</div>';
+        }
+        var n = parseInt(b.guests, 10);
+        if (st.key === 'booked' && isFinite(n) && n > 0) {
+          guestsLine = '<div class="amap-tip-line">' + n + ' guest' + (n === 1 ? '' : 's') +
+            (cap.max != null ? ' of ' + cap.max : '') + '</div>';
+        }
+      }
+      return '<div class="amap-tip">' +
+        '<div class="amap-tip-name">' + esc(apt.name || apt.id || '—') + '</div>' +
+        '<div class="amap-tip-status" style="color:' + COLOR[st.key] + '">' + LABEL[st.key] + '</div>' +
+        capLine + guestsLine + detail +
+        (apt.city ? '<div class="amap-tip-city">' + esc(apt.city) + '</div>' : '') +
+      '</div>';
+    }
+
+    var unitRow = function (apt) {
+      var st = statusOf(apt, when);
+      var cap = capacityOf(apt);
+      var capTxt = cap.max != null ? ('sleeps ' + cap.max)
+                 : (cap.base != null ? ('base ' + cap.base) : 'capacity —');
+      var b = st.booking;
+      var dates = '';
+      if (b) {
+        dates = fmt(pd(b.checkIn)) + ' → ' + fmt(pd(b.checkOut));
+        if (st.key === 'booked' && b.guestName) dates = esc(b.guestName) + ' · ' + dates;
+      }
+      return '<div class="amap-tip-unit">' +
+        '<div class="amap-tip-unit-top">' +
+          '<span class="amap-tip-dot" style="background:' + COLOR[st.key] + '"></span>' +
+          '<span class="amap-tip-unit-name">' + esc(apt.name || apt.id || '—') + '</span>' +
+          '<span class="amap-tip-unit-cap">' + capTxt + '</span>' +
+          '<span class="amap-tip-unit-status" style="color:' + COLOR[st.key] + '">' + LABEL[st.key] + '</span>' +
+        '</div>' +
+        (dates ? '<div class="amap-tip-unit-dates">' + dates + '</div>' : '') +
+      '</div>';
+    };
+
+    var free = g.units.filter(function (u) { return statusOf(u, when).key === 'free'; }).length;
+    return '<div class="amap-tip amap-tip-multi">' +
+      '<div class="amap-tip-name">' + esc(g.label) +
+        '<span class="amap-tip-count">' + g.units.length + ' units</span></div>' +
+      '<div class="amap-tip-summary">' + free + ' of ' + g.units.length + ' available now</div>' +
+      '<div class="amap-tip-units">' + g.units.map(unitRow).join('') + '</div>' +
+      (g.city ? '<div class="amap-tip-city">' + esc(g.city) + '</div>' : '') +
+    '</div>';
+  }
+
   // Clicking pins picks the two ends of a measurement: first click sets A,
   // second sets B, a third starts a fresh pair.
-  function pickForMeasure(apt) {
-    if (selA && selB) { selA = apt; selB = null; nearList = null; }
-    else if (!selA) { selA = apt; nearList = null; }
-    else if (String(apt.id) === String(selA.id)) { selA = null; nearList = null; }
-    else { selB = apt; }
+  function pickForMeasure(g) {
+    if (selA && selB) { selA = g; selB = null; nearList = null; }
+    else if (!selA) { selA = g; nearList = null; }
+    else if (g.key === selA.key) { selA = null; nearList = null; }
+    else { selB = g; }
     draw();
   }
 
@@ -137,9 +285,8 @@
     draw();
   }
 
-  function isSelected(apt) {
-    return (selA && String(selA.id) === String(apt.id)) ||
-           (selB && String(selB.id) === String(apt.id));
+  function isSelected(g) {
+    return (selA && selA.key === g.key) || (selB && selB.key === g.key);
   }
 
   function renderMeasureBar() {
@@ -153,10 +300,10 @@
       return;
     }
     if (!selB) {
-      var need = capNumber(selA);
+      var need = groupCapacity(selA);
       bar.className = 'amap-measure amap-measure-half';
       bar.innerHTML =
-        '<span class="amap-measure-from"><b>' + esc(selA.name || selA.id) + '</b> selected' +
+        '<span class="amap-measure-from"><b>' + esc(selA.label) + '</b> selected' +
           (need != null ? ' <span class="amap-measure-cap">sleeps ' + need + '</span>' : '') + '</span>' +
         '<span class="amap-measure-hint">— click a second pin to measure</span>' +
         '<button type="button" class="amap-measure-find" id="amap-find">' +
@@ -169,13 +316,12 @@
       return;
     }
 
-    var ca = coordsOf(selA), cb = coordsOf(selB);
-    var km = (ca && cb) ? distanceKm(ca, cb) : null;
+    var km = distanceKm({ lat: selA.lat, lng: selA.lng }, { lat: selB.lat, lng: selB.lng });
     bar.className = 'amap-measure amap-measure-done';
     bar.innerHTML =
-      '<span class="amap-measure-pair"><b>' + esc(selA.name || selA.id) + '</b>' +
+      '<span class="amap-measure-pair"><b>' + esc(selA.label) + '</b>' +
         '<span class="amap-measure-arrow">→</span>' +
-        '<b>' + esc(selB.name || selB.id) + '</b></span>' +
+        '<b>' + esc(selB.label) + '</b></span>' +
       '<span class="amap-measure-km">' + (km == null ? '—' : (km < 1 ? Math.round(km * 1000) + ' m' : km.toFixed(1) + ' km')) + '</span>' +
       '<span class="amap-measure-note">straight line</span>' +
       '<button type="button" class="amap-measure-clear" id="amap-clear">Clear</button>';
@@ -210,13 +356,15 @@
 
     var when = chosenMoment();
     var rows = nearList.map(function (hit, i) {
-      var st = statusOf(hit.apt, when);
-      var cap = capNumber(hit.apt);
+      var g = hit.group;
+      var key = groupStatus(g, when);
+      var cap = groupCapacity(g);
+      var units = g.units.length > 1 ? ' <span class="amap-near-units">' + g.units.length + ' units</span>' : '';
       return '<div class="amap-near-row">' +
         '<span class="amap-near-rank">' + (i + 1) + '</span>' +
-        '<span class="amap-near-name">' + esc(hit.apt.name || hit.apt.id) + '</span>' +
+        '<span class="amap-near-name">' + esc(g.label) + units + '</span>' +
         '<span class="amap-near-cap">sleeps ' + (cap == null ? '—' : cap) + '</span>' +
-        '<span class="amap-near-status" style="color:' + COLOR[st.key] + '">' + LABEL[st.key] + '</span>' +
+        '<span class="amap-near-status" style="color:' + COLOR[key] + '">' + LABEL[key] + '</span>' +
         '<span class="amap-near-km">' +
           (hit.km < 1 ? Math.round(hit.km * 1000) + ' m' : hit.km.toFixed(1) + ' km') +
         '</span>' +
@@ -225,7 +373,7 @@
 
     box.className = 'amap-near amap-near-on';
     box.innerHTML =
-      '<div class="amap-near-head">Closest options for <b>' + esc(selA.name || selA.id) + '</b>' +
+      '<div class="amap-near-head">Closest options for <b>' + esc(selA.label) + '</b>' +
         '<button type="button" class="amap-near-close" id="amap-near-x">Hide</button></div>' +
       rows;
 
@@ -311,21 +459,46 @@
     } catch (e) { /* fall through to the fetch */ }
 
     rentalInfoLoading = true;
+    setCapNote('loading');
     fetch('/api/rental-info')
-      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (r) {
+        if (!r.ok) throw new Error('rental-info ' + r.status);
+        return r.json();
+      })
       .then(function (data) {
         rentalInfo = data || {};
         rentalInfoLoading = false;
+        setCapNote(Object.keys(rentalInfo).length ? 'ok' : 'empty');
         // share it back so Daily Ops does not repeat the request
         try {
           if (typeof _opsRentalInfo !== 'undefined' && !_opsRentalInfo) _opsRentalInfo = rentalInfo;
         } catch (e) {}
+        fillPicker();
         if (map) draw();
       })
       .catch(function () {
+        // Capacity lives in Postgres; without it the map still works, it just
+        // cannot say how many each place sleeps. Say so rather than show "—".
         rentalInfo = {};
         rentalInfoLoading = false;
+        setCapNote('fail');
+        if (map) draw();
       });
+  }
+
+  // A one-line, honest report of where the capacity figures came from.
+  function setCapNote(state) {
+    var el = byId('amap-capnote');
+    if (!el) return;
+    if (state === 'loading') { el.textContent = 'Loading capacities…'; el.className = 'amap-capnote'; return; }
+    if (state === 'ok') { el.textContent = ''; el.className = 'amap-capnote'; return; }
+    if (state === 'empty') {
+      el.textContent = 'No capacities saved yet — set them in Property Info.';
+      el.className = 'amap-capnote amap-capnote-warn';
+      return;
+    }
+    el.textContent = 'Capacities unavailable (database not reachable).';
+    el.className = 'amap-capnote amap-capnote-warn';
   }
 
   function bookings() {
@@ -413,6 +586,7 @@
             '<div class="amap-sub">Every property with coordinates, coloured by whether it is free at the moment you pick.</div>' +
           '</div>' +
           '<div class="amap-controls">' +
+            '<select id="amap-pick" class="amap-input amap-pick"><option value="">Jump to apartment…</option></select>' +
             '<label class="amap-lbl" for="amap-when">Status at</label>' +
             '<input type="datetime-local" id="amap-when" class="amap-input">' +
             '<button type="button" id="amap-now" class="amap-btn">Now</button>' +
@@ -423,6 +597,7 @@
           '<span class="amap-lg"><i style="background:' + COLOR.booked + '"></i>Reserved <b id="amap-n-booked">0</b></span>' +
           '<span class="amap-lg"><i style="background:' + COLOR.blocked + '"></i>Blocked <b id="amap-n-blocked">0</b></span>' +
           '<span class="amap-lg amap-lg-muted" id="amap-missing-wrap">No coordinates <b id="amap-n-missing">0</b></span>' +
+          '<span class="amap-capnote" id="amap-capnote"></span>' +
         '</div>' +
         '<div id="amap-measure" class="amap-measure amap-measure-idle"></div>' +
         '<div id="amap-near" class="amap-near"></div>' +
@@ -435,6 +610,10 @@
     if (when && !when.value) when.value = localNowValue();
 
     if (when) when.addEventListener('change', draw);
+    var pick = byId('amap-pick');
+    if (pick) pick.addEventListener('change', onPick);
+    fillPicker();
+
     var now = byId('amap-now');
     if (now) now.addEventListener('click', function () {
       var el = byId('amap-when');
@@ -442,6 +621,56 @@
     });
 
     built = true;
+  }
+
+  // ── apartment picker ──────────────────────────────────────────────────────
+  // Fed from the same records the pins come from, so the list always matches
+  // what is on the map. Each entry carries its capacity, which is the thing
+  // you usually pick an apartment by.
+  function fillPicker() {
+    var sel = byId('amap-pick');
+    if (!sel) return;
+
+    var keep = sel.value;
+    var groups = buildGroups().groups.slice().sort(function (a, b) {
+      return String(a.label).localeCompare(String(b.label), 'el', { numeric: true });
+    });
+
+    var opts = ['<option value="">Jump to apartment…</option>'];
+    groups.forEach(function (g) {
+      var cap = groupCapacity(g);
+      var suffix = [];
+      if (g.units.length > 1) suffix.push(g.units.length + ' units');
+      if (cap != null) suffix.push('sleeps ' + cap);
+      opts.push('<option value="' + esc(g.key) + '">' + esc(g.label) +
+        (suffix.length ? ' — ' + suffix.join(' · ') : '') + '</option>');
+    });
+
+    // apartments without coordinates cannot be shown on a map; list them as
+    // disabled so it is clear they exist but are not placeable
+    var missing = buildGroups().missing;
+    if (missing.length) {
+      opts.push('<option disabled>── no coordinates ──</option>');
+      missing.forEach(function (n) {
+        opts.push('<option disabled>' + esc(n) + '</option>');
+      });
+    }
+
+    sel.innerHTML = opts.join('');
+    if (keep) sel.value = keep;
+  }
+
+  function onPick() {
+    var sel = byId('amap-pick');
+    if (!sel || !sel.value) return;
+    var g = buildGroups().groups.filter(function (x) { return x.key === sel.value; })[0];
+    if (!g || !map) return;
+
+    // selecting from the list does what clicking the pin does, so the
+    // distance and "nearest 5" tools work the same either way
+    selA = g; selB = null; nearList = null;
+    draw();
+    map.setView([g.lat, g.lng], Math.max(map.getZoom(), 15), { animate: true });
   }
 
   function localNowValue() {
@@ -500,70 +729,31 @@
     if (layer) { layer.clearLayers(); } else { layer = L.layerGroup().addTo(map); }
 
     var counts = { free: 0, booked: 0, blocked: 0 };
-    var missing = [];
     var points = [];
+    var built = buildGroups();
+    var missing = built.missing;
 
-    apartments().forEach(function (apt) {
-      var la = parseFloat(apt.lat), ln = parseFloat(apt.lng);
-      if (!isFinite(la) || !isFinite(ln)) { missing.push(apt.name || apt.id || '—'); return; }
+    built.groups.forEach(function (g) {
+      var gKey = groupStatus(g, when);
+      points.push([g.lat, g.lng]);
 
-      var st = statusOf(apt, when);
-      counts[st.key]++;
-      points.push([la, ln]);
+      // headline counts stay per apartment, not per pin — 3 units in one
+      // building is still 3 properties to account for
+      g.units.forEach(function (u) { counts[statusOf(u, when).key]++; });
 
-      var marker = L.marker([la, ln], {
-        icon: pinIcon(st.key, isSelected(apt), inNearList(apt)),
+      var marker = L.marker([g.lat, g.lng], {
+        icon: pinIcon(gKey, isSelected(g), inNearList(g), g.units.length),
         riseOnHover: true,
         title: ''
       });
-      marker.on('click', function () { pickForMeasure(apt); });
+      marker.on('click', function () { pickForMeasure(g); });
 
-      var b = st.booking;
-      var detail = '';
-      if (b) {
-        var ci = pd(b.checkIn), co = pd(b.checkOut);
-        detail = '<div class="amap-tip-line">' + fmt(ci) + ' → ' + fmt(co) + '</div>';
-        if (st.key === 'booked' && b.guestName) {
-          detail += '<div class="amap-tip-line">' + esc(b.guestName) + '</div>';
-        }
-      }
-
-      // Max capacity — the question that usually follows "is it free?"
-      var cap = capacityOf(apt);
-      var capLine = '';
-      if (cap.max) {
-        capLine = '<div class="amap-tip-cap">Sleeps up to <b>' + cap.max + '</b>' +
-          (cap.base && cap.base !== cap.max ? ' <span>(' + cap.base + ' beds + sofa)</span>' : '') +
-          '</div>';
-      } else if (cap.base) {
-        capLine = '<div class="amap-tip-cap">Base capacity <b>' + cap.base + '</b></div>';
-      } else {
-        capLine = '<div class="amap-tip-cap amap-tip-cap-none">Capacity not set</div>';
-      }
-
-      // When occupied, show how full it actually is against that capacity
-      var guestsLine = '';
-      if (b && st.key === 'booked') {
-        var g = parseInt(b.guests, 10);
-        if (isFinite(g) && g > 0) {
-          guestsLine = '<div class="amap-tip-line">' + g + ' guest' + (g === 1 ? '' : 's') +
-            (cap.max ? ' of ' + cap.max : '') + '</div>';
-        }
-      }
-
-      marker.bindTooltip(
-        '<div class="amap-tip">' +
-          '<div class="amap-tip-name">' + esc(apt.name || apt.id || '—') + '</div>' +
-          '<div class="amap-tip-status" style="color:' + COLOR[st.key] + '">' + LABEL[st.key] + '</div>' +
-          capLine +
-          guestsLine +
-          detail +
-          (apt.city ? '<div class="amap-tip-city">' + esc(apt.city) + '</div>' : '') +
-        '</div>',
-        { direction: 'top', opacity: 1, className: 'amap-tooltip' }
-      );
+      marker.bindTooltip(tooltipHtml(g, when), {
+        direction: 'top', opacity: 1, className: 'amap-tooltip'
+      });
       marker.addTo(layer);
     });
+
 
     var setTxt = function (id, v) { var el = byId(id); if (el) el.textContent = v; };
     setTxt('amap-n-free', counts.free);
@@ -591,7 +781,7 @@
     // draw (or clear) the measured connection
     if (lineLayer) { map.removeLayer(lineLayer); lineLayer = null; }
     if (selA && selB) {
-      var ca = coordsOf(selA), cb = coordsOf(selB);
+      var ca = { lat: selA.lat, lng: selA.lng }, cb = { lat: selB.lat, lng: selB.lng };
       if (ca && cb) {
         lineLayer = L.polyline([[ca.lat, ca.lng], [cb.lat, cb.lng]], {
           color: '#0f1e2e',
@@ -604,13 +794,12 @@
       }
     } else if (selA && nearList && nearList.length) {
       // spokes from the origin to each shortlisted property
-      var oc = coordsOf(selA);
+      var oc = { lat: selA.lat, lng: selA.lng };
       if (oc) {
         var spokes = [];
         var frame = [[oc.lat, oc.lng]];
         nearList.forEach(function (hit) {
-          var c = coordsOf(hit.apt);
-          if (!c) return;
+          var c = { lat: hit.group.lat, lng: hit.group.lng };
           spokes.push([[oc.lat, oc.lng], [c.lat, c.lng]]);
           frame.push([c.lat, c.lng]);
         });
@@ -624,6 +813,7 @@
       }
     }
     renderMeasureBar();
+    fillPicker();
   }
 
   // Leaflet needs a size recalculation when its container becomes visible.

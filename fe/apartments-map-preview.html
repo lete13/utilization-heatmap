@@ -204,8 +204,45 @@ body{margin:0;background:#f5f5f2;font-family:Inter,system-ui,-apple-system,sans-
   border-radius: 50%; border: 2px dashed #0f1e2e; opacity: .3;
 }
 
+/* ── Buildings with several units on one pin ───────────────────────────────
+   One street door, several apartments: the pin carries the count and the
+   tooltip lists every unit so none is hidden underneath. */
+.amap-pin-badge {
+  position: absolute; left: 0; right: 0; top: 5px;
+  text-align: center; font-size: 11px; font-weight: 800; color: #fff;
+  line-height: 1; pointer-events: none; letter-spacing: -.02em;
+}
+.amap-tip-multi { min-width: 250px; white-space: normal; }
+.amap-tip-count {
+  font-size: 10px; font-weight: 700; color: #626967; background: #eef1f4;
+  border-radius: 999px; padding: 2px 7px; margin-left: 6px; vertical-align: middle;
+}
+.amap-tip-summary { font-size: 11px; color: #626967; margin: 2px 0 6px; }
+.amap-tip-units { border-top: 1px solid rgba(0,0,0,.07); padding-top: 4px; }
+.amap-tip-unit { padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,.045); }
+.amap-tip-unit:last-child { border-bottom: none; }
+.amap-tip-unit-top { display: flex; align-items: center; gap: 6px; }
+.amap-tip-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.amap-tip-unit-name { font-size: 11.5px; font-weight: 600; color: #16283a; flex: 1 1 auto; }
+.amap-tip-unit-cap { font-size: 10.5px; color: #888b87; }
+.amap-tip-unit-status { font-size: 10.5px; font-weight: 700; }
+.amap-tip-unit-dates { font-size: 10px; color: #98a0a6; margin-left: 13px; margin-top: 1px; }
+.amap-near-units {
+  font-size: 10px; font-weight: 700; color: #626967; background: #eef1f4;
+  border-radius: 999px; padding: 1px 6px; margin-left: 5px;
+}
+
+/* ── Apartment picker + capacity source note ───────────────────────────────*/
+.amap-pick {
+  min-width: 240px; max-width: 320px; cursor: pointer;
+  font-size: 12.5px; padding: 7px 10px;
+}
+.amap-pick:focus { border-color: #0f1e2e; }
+.amap-capnote { font-size: 11px; color: #98a0a6; }
+.amap-capnote-warn { color: #b9915a; font-weight: 600; }
+
 </style></head><body>
-<div class="banner">PREVIEW — Apartments Map · <b>hover</b> a pin for status + capacity · <b>click</b> a pin, then click a second to measure · or press <b>“Nearest 5”</b> to find bigger places close by</div>
+<div class="banner">PREVIEW — capacities loaded from the database · use the <b>“Jump to apartment…”</b> dropdown to pick one · hover a pin for all units · click two pins to measure · “Nearest 5” finds bigger places nearby</div>
 <div id="tab-ops" class="tab-panel"></div>
 
 <script>
@@ -215,36 +252,45 @@ function parseD(v){if(!v)return null;const s=String(v).trim();
  if(m)return new Date(m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'));
  const d=new Date(s);return isNaN(d)?null:d;}
 function isRevenueBooking(b){return !BLOCK_NAMES.includes(String(b.guestName||'').toLowerCase().trim());}
-let _opsRentalInfo={
+// simulates the Postgres rental_info table served by /api/rental-info
+const DB_RENTAL_INFO={
+ v1:{houseRules:{maximum_guests:'4',base_capacity:'2'}},
+ v2:{houseRules:{maximum_guests:'6',base_capacity:'4'}},
+ v3:{houseRules:{maximum_guests:'2',base_capacity:'2'}},
+ av1:{houseRules:{maximum_guests:'5',base_capacity:'3'}},
+ av2:{houseRules:{maximum_guests:'4',base_capacity:'4'}},
+ av3:{houseRules:{maximum_guests:'3',base_capacity:'2'}},
  a1:{houseRules:{maximum_guests:'4',base_capacity:'2'}},
  a2:{houseRules:{maximum_guests:'6',base_capacity:'4'}},
- a3:{houseRules:{maximum_guests:'2',base_capacity:'2'}},
- a4:{houseRules:{maximum_guests:'5',base_capacity:'3'}},
- a5:{houseRules:{maximum_guests:'8',base_capacity:'6'}},
- a6:{houseRules:{maximum_guests:'3',base_capacity:'3'}},
- a7:{houseRules:{maximum_guests:'4',base_capacity:'4'}},
- a8:{houseRules:{maximum_guests:'6',base_capacity:'4'}},
- a9:{houseRules:{maximum_guests:'2',base_capacity:'2'}}
+ a3:{houseRules:{maximum_guests:'8',base_capacity:'6'}},
+ a4:{houseRules:{maximum_guests:'2',base_capacity:'2'}}
 };
 const S={apts:[
+ {id:'v1',name:'Votsala 1 Luxury Stay with Patio',lat:37.9480,lng:23.6430,city:'Piraeus'},
+ {id:'v2',name:'Votsala 2 Luxury Stay with Patio',lat:37.94802,lng:23.64301,city:'Piraeus'},
+ {id:'v3',name:'Votsala 3 Deluxe Apartment',lat:37.9480,lng:23.6430,city:'Piraeus'},
+ {id:'av1',name:'The Athenian Veranda',lat:37.9760,lng:23.7290,city:'Athens'},
+ {id:'av2',name:'The Athenian Veranda 2',lat:37.9760,lng:23.7290,city:'Athens'},
+ {id:'av3',name:'The Athenian Veranda 3',lat:37.97601,lng:23.72902,city:'Athens'},
  {id:'a1',name:'Vista Acropolis',lat:37.9715,lng:23.7267,city:'Athens'},
  {id:'a2',name:'The Athenian Cedar',lat:37.9838,lng:23.7275,city:'Athens'},
- {id:'a3',name:'Pixie Studio Athens',lat:38.0080,lng:23.7830,city:'Psichiko'},
- {id:'a4',name:'Birdhouse Apartment',lat:38.0030,lng:23.7950,city:'Cholargos'},
- {id:'a5',name:'Votsala 1 Luxury Stay',lat:37.9480,lng:23.6430,city:'Piraeus'},
- {id:'a6',name:'Le Plaza Thessaloniki',lat:40.6330,lng:22.9410,city:'Thessaloniki'},
- {id:'a7',name:'Elysian Cornerstone',lat:37.9760,lng:23.7330,city:'Athens'},
- {id:'a8',name:'Elysian Smyrni',lat:37.9450,lng:23.7150,city:'Nea Smyrni'},
- {id:'a9',name:'Athens Riviera Escape',lat:37.8880,lng:23.7480,city:'Argyroupoli'},
- {id:'a10',name:'No Coords Studio'}
+ {id:'a3',name:'Le Plaza Thessaloniki',lat:40.6330,lng:22.9410,city:'Thessaloniki'},
+ {id:'a4',name:'Pixie Studio Athens',lat:38.0080,lng:23.7830,city:'Psichiko'},
+ {id:'nc',name:'No Coords Studio'}
 ],bks:[
- {aptId:'a2',guestName:'Maria K.',guests:5,checkIn:'20/08/2026',checkOut:'26/08/2026'},
- {aptId:'a4',guestName:'John Smith',guests:3,checkIn:'22/08/2026',checkOut:'25/08/2026'},
- {aptId:'a6',guestName:'Blocked',checkIn:'21/08/2026',checkOut:'28/08/2026'},
- {aptId:'a9',guestName:'Maintenance',checkIn:'23/08/2026',checkOut:'24/08/2026'}
+ {aptId:'v2',guestName:'Maria K.',guests:5,checkIn:'20/08/2026',checkOut:'26/08/2026'},
+ {aptId:'v3',guestName:'Blocked',checkIn:'21/08/2026',checkOut:'28/08/2026'},
+ {aptId:'av1',guestName:'John Smith',guests:4,checkIn:'22/08/2026',checkOut:'25/08/2026'},
+ {aptId:'a2',guestName:'Anna P.',guests:5,checkIn:'23/08/2026',checkOut:'27/08/2026'},
+ {aptId:'a4',guestName:'Maintenance',checkIn:'23/08/2026',checkOut:'24/08/2026'}
 ]};
 function showTab(n,b){}
-window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve(_opsRentalInfo)});};
+// the map fetches capacities from the database on open
+window.fetch=function(u){
+  if(String(u).indexOf('rental-info')>=0)
+    return Promise.resolve({ok:true,json:()=>Promise.resolve(DB_RENTAL_INFO)});
+  return Promise.reject(new Error('no'));
+};
 </script>
 
 <script>/* apartments-map.js — "Apartments Map" tab
@@ -274,8 +320,13 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
 
   // A teardrop pin drawn as inline SVG: reads as a map marker rather than a
   // dot, keeps its colour meaning, and stays crisp at every zoom level.
-  function pinIcon(kind, selected, shortlisted) {
+  function pinIcon(kind, selected, shortlisted, unitCount) {
     var fill = COLOR[kind];
+    // a building with several units carries the count, so an operator can see
+    // at a glance that one pin stands for more than one property
+    var badge = (unitCount > 1)
+      ? '<span class="amap-pin-badge">' + unitCount + '</span>'
+      : '';
     var html =
       '<div class="amap-pin amap-pin-' + kind +
         (selected ? ' amap-pin-sel' : '') +
@@ -283,8 +334,8 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
         '<svg width="26" height="34" viewBox="0 0 26 34" xmlns="http://www.w3.org/2000/svg">' +
           '<path d="M13 33.2C13 33.2 24.6 20.9 24.6 13A11.6 11.6 0 1 0 1.4 13c0 7.9 11.6 20.2 11.6 20.2z" ' +
             'fill="' + fill + '" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round"/>' +
-          '<circle cx="13" cy="12.8" r="4.1" fill="#ffffff" fill-opacity=".92"/>' +
-        '</svg>' +
+          (unitCount > 1 ? '' : '<circle cx="13" cy="12.8" r="4.1" fill="#ffffff" fill-opacity=".92"/>') +
+        '</svg>' + badge +
       '</div>';
     return L.divIcon({
       html: html,
@@ -313,23 +364,31 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
     return c.max != null ? c.max : c.base;
   }
 
+  // For a building, the relevant figure is the largest unit it can offer.
+  function groupCapacity(g) {
+    var best = null;
+    g.units.forEach(function (u) {
+      var n = capNumber(u);
+      if (n != null && (best == null || n > best)) best = n;
+    });
+    return best;
+  }
+
   // The five closest properties that could host the same party — same
   // capacity or larger. Used when a stay has to be moved somewhere else.
   function nearestBigEnough(origin, limit) {
-    var oc = coordsOf(origin);
-    if (!oc) return [];
-    var need = capNumber(origin);
+    var need = groupCapacity(origin);
+    var oc = { lat: origin.lat, lng: origin.lng };
 
-    return apartments()
-      .filter(function (a) {
-        if (String(a.id) === String(origin.id)) return false;
-        if (!coordsOf(a)) return false;
+    return buildGroups().groups
+      .filter(function (g) {
+        if (g.key === origin.key) return false;
         if (need == null) return true;          // nothing to compare against
-        var c = capNumber(a);
+        var c = groupCapacity(g);
         return c != null && c >= need;
       })
-      .map(function (a) {
-        return { apt: a, km: distanceKm(oc, coordsOf(a)) };
+      .map(function (g) {
+        return { group: g, km: distanceKm(oc, { lat: g.lat, lng: g.lng }) };
       })
       .sort(function (x, y) { return x.km - y.km; })
       .slice(0, limit || 5);
@@ -347,10 +406,10 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
     draw();
   }
 
-  function inNearList(apt) {
+  function inNearList(g) {
     if (!nearList) return false;
     for (var i = 0; i < nearList.length; i++) {
-      if (String(nearList[i].apt.id) === String(apt.id)) return true;
+      if (nearList[i].group.key === g.key) return true;
     }
     return false;
   }
@@ -371,13 +430,148 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
     return (isFinite(la) && isFinite(ln)) ? { lat: la, lng: ln } : null;
   }
 
+  // Several units often share one street door (Votsala 1/2/3, Veranda 1/2/3).
+  // Stacking a pin per unit hides all but the top one, so pins are grouped by
+  // location and the tooltip lists every unit at that address.
+  // ~4 decimals ≈ 11 m, close enough to catch units the channel geocoded to
+  // slightly different points in the same building.
+  function locationKey(c) {
+    return c.lat.toFixed(4) + ',' + c.lng.toFixed(4);
+  }
+
+  function buildGroups() {
+    var groups = [];
+    var index = {};
+    var missing = [];
+
+    apartments().forEach(function (apt) {
+      var c = coordsOf(apt);
+      if (!c) { missing.push(apt.name || apt.id || '—'); return; }
+      var key = locationKey(c);
+      if (!index[key]) {
+        index[key] = { key: key, lat: c.lat, lng: c.lng, units: [] };
+        groups.push(index[key]);
+      }
+      index[key].units.push(apt);
+    });
+
+    groups.forEach(function (g) {
+      g.units.sort(function (a, b) {
+        return String(a.name || '').localeCompare(String(b.name || ''), 'el', { numeric: true });
+      });
+      // a group is "available" if anything in it is free — that is the thing
+      // an operator is scanning for; otherwise reserved beats blocked.
+      g.label = g.units.length === 1
+        ? (g.units[0].name || g.units[0].id || '—')
+        : buildingLabel(g.units);
+      g.city = g.units[0].city || '';
+    });
+
+    return { groups: groups, missing: missing };
+  }
+
+  // "Votsala 1 Luxury Stay" + "Votsala 2 Luxury Stay" → "Votsala"
+  function buildingLabel(units) {
+    var names = units.map(function (u) { return String(u.name || ''); });
+    var first = names[0].split(/\s+/);
+    var common = [];
+    for (var i = 0; i < first.length; i++) {
+      var word = first[i];
+      var everyone = names.every(function (n) { return n.split(/\s+/)[i] === word; });
+      if (!everyone) break;
+      common.push(word);
+    }
+    var label = common.join(' ').replace(/[,\-–|]+$/, '').trim();
+    return label || (names[0] + ' + ' + (units.length - 1) + ' more');
+  }
+
+  // Status for a whole group: free wins (that is what you are hunting for),
+  // then reserved, then blocked.
+  function groupStatus(group, when) {
+    var any = { free: false, booked: false, blocked: false };
+    group.units.forEach(function (u) { any[statusOf(u, when).key] = true; });
+    if (any.free) return 'free';
+    if (any.booked) return 'booked';
+    return 'blocked';
+  }
+
+  // Tooltip for one pin. A single unit reads as before; a building lists every
+  // unit at that address with its own status and capacity, so nothing stays
+  // hidden behind an overlapping pin.
+  function tooltipHtml(g, when) {
+    if (g.units.length === 1) {
+      var apt = g.units[0];
+      var st = statusOf(apt, when);
+      var cap = capacityOf(apt);
+      var capLine;
+      if (cap.max != null) {
+        capLine = '<div class="amap-tip-cap">Sleeps up to <b>' + cap.max + '</b>' +
+          (cap.base != null && cap.base !== cap.max ? ' <span>(' + cap.base + ' beds + sofa)</span>' : '') + '</div>';
+      } else if (cap.base != null) {
+        capLine = '<div class="amap-tip-cap">Base capacity <b>' + cap.base + '</b></div>';
+      } else {
+        capLine = '<div class="amap-tip-cap amap-tip-cap-none">Capacity not set</div>';
+      }
+
+      var b = st.booking, detail = '', guestsLine = '';
+      if (b) {
+        detail = '<div class="amap-tip-line">' + fmt(pd(b.checkIn)) + ' → ' + fmt(pd(b.checkOut)) + '</div>';
+        if (st.key === 'booked' && b.guestName) {
+          detail += '<div class="amap-tip-line">' + esc(b.guestName) + '</div>';
+        }
+        var n = parseInt(b.guests, 10);
+        if (st.key === 'booked' && isFinite(n) && n > 0) {
+          guestsLine = '<div class="amap-tip-line">' + n + ' guest' + (n === 1 ? '' : 's') +
+            (cap.max != null ? ' of ' + cap.max : '') + '</div>';
+        }
+      }
+      return '<div class="amap-tip">' +
+        '<div class="amap-tip-name">' + esc(apt.name || apt.id || '—') + '</div>' +
+        '<div class="amap-tip-status" style="color:' + COLOR[st.key] + '">' + LABEL[st.key] + '</div>' +
+        capLine + guestsLine + detail +
+        (apt.city ? '<div class="amap-tip-city">' + esc(apt.city) + '</div>' : '') +
+      '</div>';
+    }
+
+    var unitRow = function (apt) {
+      var st = statusOf(apt, when);
+      var cap = capacityOf(apt);
+      var capTxt = cap.max != null ? ('sleeps ' + cap.max)
+                 : (cap.base != null ? ('base ' + cap.base) : 'capacity —');
+      var b = st.booking;
+      var dates = '';
+      if (b) {
+        dates = fmt(pd(b.checkIn)) + ' → ' + fmt(pd(b.checkOut));
+        if (st.key === 'booked' && b.guestName) dates = esc(b.guestName) + ' · ' + dates;
+      }
+      return '<div class="amap-tip-unit">' +
+        '<div class="amap-tip-unit-top">' +
+          '<span class="amap-tip-dot" style="background:' + COLOR[st.key] + '"></span>' +
+          '<span class="amap-tip-unit-name">' + esc(apt.name || apt.id || '—') + '</span>' +
+          '<span class="amap-tip-unit-cap">' + capTxt + '</span>' +
+          '<span class="amap-tip-unit-status" style="color:' + COLOR[st.key] + '">' + LABEL[st.key] + '</span>' +
+        '</div>' +
+        (dates ? '<div class="amap-tip-unit-dates">' + dates + '</div>' : '') +
+      '</div>';
+    };
+
+    var free = g.units.filter(function (u) { return statusOf(u, when).key === 'free'; }).length;
+    return '<div class="amap-tip amap-tip-multi">' +
+      '<div class="amap-tip-name">' + esc(g.label) +
+        '<span class="amap-tip-count">' + g.units.length + ' units</span></div>' +
+      '<div class="amap-tip-summary">' + free + ' of ' + g.units.length + ' available now</div>' +
+      '<div class="amap-tip-units">' + g.units.map(unitRow).join('') + '</div>' +
+      (g.city ? '<div class="amap-tip-city">' + esc(g.city) + '</div>' : '') +
+    '</div>';
+  }
+
   // Clicking pins picks the two ends of a measurement: first click sets A,
   // second sets B, a third starts a fresh pair.
-  function pickForMeasure(apt) {
-    if (selA && selB) { selA = apt; selB = null; nearList = null; }
-    else if (!selA) { selA = apt; nearList = null; }
-    else if (String(apt.id) === String(selA.id)) { selA = null; nearList = null; }
-    else { selB = apt; }
+  function pickForMeasure(g) {
+    if (selA && selB) { selA = g; selB = null; nearList = null; }
+    else if (!selA) { selA = g; nearList = null; }
+    else if (g.key === selA.key) { selA = null; nearList = null; }
+    else { selB = g; }
     draw();
   }
 
@@ -386,9 +580,8 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
     draw();
   }
 
-  function isSelected(apt) {
-    return (selA && String(selA.id) === String(apt.id)) ||
-           (selB && String(selB.id) === String(apt.id));
+  function isSelected(g) {
+    return (selA && selA.key === g.key) || (selB && selB.key === g.key);
   }
 
   function renderMeasureBar() {
@@ -402,10 +595,10 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
       return;
     }
     if (!selB) {
-      var need = capNumber(selA);
+      var need = groupCapacity(selA);
       bar.className = 'amap-measure amap-measure-half';
       bar.innerHTML =
-        '<span class="amap-measure-from"><b>' + esc(selA.name || selA.id) + '</b> selected' +
+        '<span class="amap-measure-from"><b>' + esc(selA.label) + '</b> selected' +
           (need != null ? ' <span class="amap-measure-cap">sleeps ' + need + '</span>' : '') + '</span>' +
         '<span class="amap-measure-hint">— click a second pin to measure</span>' +
         '<button type="button" class="amap-measure-find" id="amap-find">' +
@@ -418,13 +611,12 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
       return;
     }
 
-    var ca = coordsOf(selA), cb = coordsOf(selB);
-    var km = (ca && cb) ? distanceKm(ca, cb) : null;
+    var km = distanceKm({ lat: selA.lat, lng: selA.lng }, { lat: selB.lat, lng: selB.lng });
     bar.className = 'amap-measure amap-measure-done';
     bar.innerHTML =
-      '<span class="amap-measure-pair"><b>' + esc(selA.name || selA.id) + '</b>' +
+      '<span class="amap-measure-pair"><b>' + esc(selA.label) + '</b>' +
         '<span class="amap-measure-arrow">→</span>' +
-        '<b>' + esc(selB.name || selB.id) + '</b></span>' +
+        '<b>' + esc(selB.label) + '</b></span>' +
       '<span class="amap-measure-km">' + (km == null ? '—' : (km < 1 ? Math.round(km * 1000) + ' m' : km.toFixed(1) + ' km')) + '</span>' +
       '<span class="amap-measure-note">straight line</span>' +
       '<button type="button" class="amap-measure-clear" id="amap-clear">Clear</button>';
@@ -459,13 +651,15 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
 
     var when = chosenMoment();
     var rows = nearList.map(function (hit, i) {
-      var st = statusOf(hit.apt, when);
-      var cap = capNumber(hit.apt);
+      var g = hit.group;
+      var key = groupStatus(g, when);
+      var cap = groupCapacity(g);
+      var units = g.units.length > 1 ? ' <span class="amap-near-units">' + g.units.length + ' units</span>' : '';
       return '<div class="amap-near-row">' +
         '<span class="amap-near-rank">' + (i + 1) + '</span>' +
-        '<span class="amap-near-name">' + esc(hit.apt.name || hit.apt.id) + '</span>' +
+        '<span class="amap-near-name">' + esc(g.label) + units + '</span>' +
         '<span class="amap-near-cap">sleeps ' + (cap == null ? '—' : cap) + '</span>' +
-        '<span class="amap-near-status" style="color:' + COLOR[st.key] + '">' + LABEL[st.key] + '</span>' +
+        '<span class="amap-near-status" style="color:' + COLOR[key] + '">' + LABEL[key] + '</span>' +
         '<span class="amap-near-km">' +
           (hit.km < 1 ? Math.round(hit.km * 1000) + ' m' : hit.km.toFixed(1) + ' km') +
         '</span>' +
@@ -474,7 +668,7 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
 
     box.className = 'amap-near amap-near-on';
     box.innerHTML =
-      '<div class="amap-near-head">Closest options for <b>' + esc(selA.name || selA.id) + '</b>' +
+      '<div class="amap-near-head">Closest options for <b>' + esc(selA.label) + '</b>' +
         '<button type="button" class="amap-near-close" id="amap-near-x">Hide</button></div>' +
       rows;
 
@@ -560,21 +754,46 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
     } catch (e) { /* fall through to the fetch */ }
 
     rentalInfoLoading = true;
+    setCapNote('loading');
     fetch('/api/rental-info')
-      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (r) {
+        if (!r.ok) throw new Error('rental-info ' + r.status);
+        return r.json();
+      })
       .then(function (data) {
         rentalInfo = data || {};
         rentalInfoLoading = false;
+        setCapNote(Object.keys(rentalInfo).length ? 'ok' : 'empty');
         // share it back so Daily Ops does not repeat the request
         try {
           if (typeof _opsRentalInfo !== 'undefined' && !_opsRentalInfo) _opsRentalInfo = rentalInfo;
         } catch (e) {}
+        fillPicker();
         if (map) draw();
       })
       .catch(function () {
+        // Capacity lives in Postgres; without it the map still works, it just
+        // cannot say how many each place sleeps. Say so rather than show "—".
         rentalInfo = {};
         rentalInfoLoading = false;
+        setCapNote('fail');
+        if (map) draw();
       });
+  }
+
+  // A one-line, honest report of where the capacity figures came from.
+  function setCapNote(state) {
+    var el = byId('amap-capnote');
+    if (!el) return;
+    if (state === 'loading') { el.textContent = 'Loading capacities…'; el.className = 'amap-capnote'; return; }
+    if (state === 'ok') { el.textContent = ''; el.className = 'amap-capnote'; return; }
+    if (state === 'empty') {
+      el.textContent = 'No capacities saved yet — set them in Property Info.';
+      el.className = 'amap-capnote amap-capnote-warn';
+      return;
+    }
+    el.textContent = 'Capacities unavailable (database not reachable).';
+    el.className = 'amap-capnote amap-capnote-warn';
   }
 
   function bookings() {
@@ -662,6 +881,7 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
             '<div class="amap-sub">Every property with coordinates, coloured by whether it is free at the moment you pick.</div>' +
           '</div>' +
           '<div class="amap-controls">' +
+            '<select id="amap-pick" class="amap-input amap-pick"><option value="">Jump to apartment…</option></select>' +
             '<label class="amap-lbl" for="amap-when">Status at</label>' +
             '<input type="datetime-local" id="amap-when" class="amap-input">' +
             '<button type="button" id="amap-now" class="amap-btn">Now</button>' +
@@ -672,6 +892,7 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
           '<span class="amap-lg"><i style="background:' + COLOR.booked + '"></i>Reserved <b id="amap-n-booked">0</b></span>' +
           '<span class="amap-lg"><i style="background:' + COLOR.blocked + '"></i>Blocked <b id="amap-n-blocked">0</b></span>' +
           '<span class="amap-lg amap-lg-muted" id="amap-missing-wrap">No coordinates <b id="amap-n-missing">0</b></span>' +
+          '<span class="amap-capnote" id="amap-capnote"></span>' +
         '</div>' +
         '<div id="amap-measure" class="amap-measure amap-measure-idle"></div>' +
         '<div id="amap-near" class="amap-near"></div>' +
@@ -684,6 +905,10 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
     if (when && !when.value) when.value = localNowValue();
 
     if (when) when.addEventListener('change', draw);
+    var pick = byId('amap-pick');
+    if (pick) pick.addEventListener('change', onPick);
+    fillPicker();
+
     var now = byId('amap-now');
     if (now) now.addEventListener('click', function () {
       var el = byId('amap-when');
@@ -691,6 +916,56 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
     });
 
     built = true;
+  }
+
+  // ── apartment picker ──────────────────────────────────────────────────────
+  // Fed from the same records the pins come from, so the list always matches
+  // what is on the map. Each entry carries its capacity, which is the thing
+  // you usually pick an apartment by.
+  function fillPicker() {
+    var sel = byId('amap-pick');
+    if (!sel) return;
+
+    var keep = sel.value;
+    var groups = buildGroups().groups.slice().sort(function (a, b) {
+      return String(a.label).localeCompare(String(b.label), 'el', { numeric: true });
+    });
+
+    var opts = ['<option value="">Jump to apartment…</option>'];
+    groups.forEach(function (g) {
+      var cap = groupCapacity(g);
+      var suffix = [];
+      if (g.units.length > 1) suffix.push(g.units.length + ' units');
+      if (cap != null) suffix.push('sleeps ' + cap);
+      opts.push('<option value="' + esc(g.key) + '">' + esc(g.label) +
+        (suffix.length ? ' — ' + suffix.join(' · ') : '') + '</option>');
+    });
+
+    // apartments without coordinates cannot be shown on a map; list them as
+    // disabled so it is clear they exist but are not placeable
+    var missing = buildGroups().missing;
+    if (missing.length) {
+      opts.push('<option disabled>── no coordinates ──</option>');
+      missing.forEach(function (n) {
+        opts.push('<option disabled>' + esc(n) + '</option>');
+      });
+    }
+
+    sel.innerHTML = opts.join('');
+    if (keep) sel.value = keep;
+  }
+
+  function onPick() {
+    var sel = byId('amap-pick');
+    if (!sel || !sel.value) return;
+    var g = buildGroups().groups.filter(function (x) { return x.key === sel.value; })[0];
+    if (!g || !map) return;
+
+    // selecting from the list does what clicking the pin does, so the
+    // distance and "nearest 5" tools work the same either way
+    selA = g; selB = null; nearList = null;
+    draw();
+    map.setView([g.lat, g.lng], Math.max(map.getZoom(), 15), { animate: true });
   }
 
   function localNowValue() {
@@ -749,70 +1024,31 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
     if (layer) { layer.clearLayers(); } else { layer = L.layerGroup().addTo(map); }
 
     var counts = { free: 0, booked: 0, blocked: 0 };
-    var missing = [];
     var points = [];
+    var built = buildGroups();
+    var missing = built.missing;
 
-    apartments().forEach(function (apt) {
-      var la = parseFloat(apt.lat), ln = parseFloat(apt.lng);
-      if (!isFinite(la) || !isFinite(ln)) { missing.push(apt.name || apt.id || '—'); return; }
+    built.groups.forEach(function (g) {
+      var gKey = groupStatus(g, when);
+      points.push([g.lat, g.lng]);
 
-      var st = statusOf(apt, when);
-      counts[st.key]++;
-      points.push([la, ln]);
+      // headline counts stay per apartment, not per pin — 3 units in one
+      // building is still 3 properties to account for
+      g.units.forEach(function (u) { counts[statusOf(u, when).key]++; });
 
-      var marker = L.marker([la, ln], {
-        icon: pinIcon(st.key, isSelected(apt), inNearList(apt)),
+      var marker = L.marker([g.lat, g.lng], {
+        icon: pinIcon(gKey, isSelected(g), inNearList(g), g.units.length),
         riseOnHover: true,
         title: ''
       });
-      marker.on('click', function () { pickForMeasure(apt); });
+      marker.on('click', function () { pickForMeasure(g); });
 
-      var b = st.booking;
-      var detail = '';
-      if (b) {
-        var ci = pd(b.checkIn), co = pd(b.checkOut);
-        detail = '<div class="amap-tip-line">' + fmt(ci) + ' → ' + fmt(co) + '</div>';
-        if (st.key === 'booked' && b.guestName) {
-          detail += '<div class="amap-tip-line">' + esc(b.guestName) + '</div>';
-        }
-      }
-
-      // Max capacity — the question that usually follows "is it free?"
-      var cap = capacityOf(apt);
-      var capLine = '';
-      if (cap.max) {
-        capLine = '<div class="amap-tip-cap">Sleeps up to <b>' + cap.max + '</b>' +
-          (cap.base && cap.base !== cap.max ? ' <span>(' + cap.base + ' beds + sofa)</span>' : '') +
-          '</div>';
-      } else if (cap.base) {
-        capLine = '<div class="amap-tip-cap">Base capacity <b>' + cap.base + '</b></div>';
-      } else {
-        capLine = '<div class="amap-tip-cap amap-tip-cap-none">Capacity not set</div>';
-      }
-
-      // When occupied, show how full it actually is against that capacity
-      var guestsLine = '';
-      if (b && st.key === 'booked') {
-        var g = parseInt(b.guests, 10);
-        if (isFinite(g) && g > 0) {
-          guestsLine = '<div class="amap-tip-line">' + g + ' guest' + (g === 1 ? '' : 's') +
-            (cap.max ? ' of ' + cap.max : '') + '</div>';
-        }
-      }
-
-      marker.bindTooltip(
-        '<div class="amap-tip">' +
-          '<div class="amap-tip-name">' + esc(apt.name || apt.id || '—') + '</div>' +
-          '<div class="amap-tip-status" style="color:' + COLOR[st.key] + '">' + LABEL[st.key] + '</div>' +
-          capLine +
-          guestsLine +
-          detail +
-          (apt.city ? '<div class="amap-tip-city">' + esc(apt.city) + '</div>' : '') +
-        '</div>',
-        { direction: 'top', opacity: 1, className: 'amap-tooltip' }
-      );
+      marker.bindTooltip(tooltipHtml(g, when), {
+        direction: 'top', opacity: 1, className: 'amap-tooltip'
+      });
       marker.addTo(layer);
     });
+
 
     var setTxt = function (id, v) { var el = byId(id); if (el) el.textContent = v; };
     setTxt('amap-n-free', counts.free);
@@ -840,7 +1076,7 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
     // draw (or clear) the measured connection
     if (lineLayer) { map.removeLayer(lineLayer); lineLayer = null; }
     if (selA && selB) {
-      var ca = coordsOf(selA), cb = coordsOf(selB);
+      var ca = { lat: selA.lat, lng: selA.lng }, cb = { lat: selB.lat, lng: selB.lng };
       if (ca && cb) {
         lineLayer = L.polyline([[ca.lat, ca.lng], [cb.lat, cb.lng]], {
           color: '#0f1e2e',
@@ -853,13 +1089,12 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
       }
     } else if (selA && nearList && nearList.length) {
       // spokes from the origin to each shortlisted property
-      var oc = coordsOf(selA);
+      var oc = { lat: selA.lat, lng: selA.lng };
       if (oc) {
         var spokes = [];
         var frame = [[oc.lat, oc.lng]];
         nearList.forEach(function (hit) {
-          var c = coordsOf(hit.apt);
-          if (!c) return;
+          var c = { lat: hit.group.lat, lng: hit.group.lng };
           spokes.push([[oc.lat, oc.lng], [c.lat, c.lng]]);
           frame.push([c.lat, c.lng]);
         });
@@ -873,6 +1108,7 @@ window.fetch=function(){return Promise.resolve({ok:true,json:()=>Promise.resolve
       }
     }
     renderMeasureBar();
+    fillPicker();
   }
 
   // Leaflet needs a size recalculation when its container becomes visible.
