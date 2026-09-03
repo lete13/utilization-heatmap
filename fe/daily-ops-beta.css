@@ -2283,7 +2283,7 @@
    A tooltip listing several units is wide; cap it against the viewport and
    let a long unit list scroll rather than run off the map. */
 .leaflet-tooltip.amap-tooltip {
-  max-width: min(330px, 78vw);
+  max-width: min(280px, 70vw);
   white-space: normal;
   overflow-wrap: anywhere;
 }

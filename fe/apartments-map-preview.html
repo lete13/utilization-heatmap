@@ -256,7 +256,7 @@ body{margin:0;background:#f5f5f2;font-family:Inter,system-ui,-apple-system,sans-
    A tooltip listing several units is wide; cap it against the viewport and
    let a long unit list scroll rather than run off the map. */
 .leaflet-tooltip.amap-tooltip {
-  max-width: min(330px, 78vw);
+  max-width: min(280px, 70vw);
   white-space: normal;
   overflow-wrap: anywhere;
 }
@@ -273,7 +273,7 @@ body{margin:0;background:#f5f5f2;font-family:Inter,system-ui,-apple-system,sans-
 .amap-tip-unit-name { min-width: 0; overflow-wrap: anywhere; }
 
 </style></head><body>
-<div class="banner">PREVIEW — buildings sit on the <b>far edges on purpose</b>: hover the west, east and north pins and the tooltip is pushed back inside the map instead of being cut. The north tower has 5 units, so its list scrolls.</div>
+<div class="banner">PREVIEW — tooltips no longer jump: the side is chosen from the pin position before opening (left / right / below near the edges)</div>
 <div id="tab-ops" class="tab-panel"></div>
 
 <script>
@@ -284,32 +284,28 @@ function parseD(v){if(!v)return null;const s=String(v).trim();
  const d=new Date(s);return isNaN(d)?null:d;}
 function isRevenueBooking(b){return !BLOCK_NAMES.includes(String(b.guestName||'').toLowerCase().trim());}
 const DB={};
-['w1','w2','w3','w4','e1','e2','e3','n1','n2','n3','n4','n5','c1'].forEach(function(id,i){
+['w1','w2','w3','e1','e2','e3','n1','n2','n3','c1','c2'].forEach(function(id,i){
   DB[id]={houseRules:{maximum_guests:String(2+(i%6)),base_capacity:String(2+(i%4))}};
 });
 const S={apts:[
- // west edge — 3 units
- {id:'w1',name:'Votsala 1 Luxury Stay with Patio',lat:37.9500,lng:23.5600,city:'Piraeus'},
- {id:'w2',name:'Votsala 2 Luxury Stay with Patio',lat:37.9500,lng:23.5600,city:'Piraeus'},
- {id:'w3',name:'Votsala 3 Deluxe Apartment',lat:37.95001,lng:23.56001,city:'Piraeus'},
- {id:'w4',name:'Votsala 4 Garden Suite',lat:37.9500,lng:23.5600,city:'Piraeus'},
- // east edge — 3 units
- {id:'e1',name:'The Athenian Veranda',lat:37.9800,lng:23.9200,city:'Athens'},
- {id:'e2',name:'The Athenian Veranda 2',lat:37.9800,lng:23.9200,city:'Athens'},
- {id:'e3',name:'The Athenian Veranda 3',lat:37.98001,lng:23.92001,city:'Athens'},
- // north edge — 5 units (tests scrolling)
- {id:'n1',name:'Elysian Tower A1',lat:38.0900,lng:23.7500,city:'Kifisia'},
- {id:'n2',name:'Elysian Tower A2',lat:38.0900,lng:23.7500,city:'Kifisia'},
- {id:'n3',name:'Elysian Tower A3',lat:38.0900,lng:23.7500,city:'Kifisia'},
- {id:'n4',name:'Elysian Tower A4',lat:38.09001,lng:23.75001,city:'Kifisia'},
- {id:'n5',name:'Elysian Tower A5',lat:38.0900,lng:23.7500,city:'Kifisia'},
- {id:'c1',name:'Vista Acropolis',lat:37.9715,lng:23.7267,city:'Athens'}
+ {id:'w1',name:'Votsala 1 Luxury Stay',lat:37.9480,lng:23.6430,city:'Piraeus'},
+ {id:'w2',name:'Votsala 2 Luxury Stay',lat:37.9480,lng:23.6430,city:'Piraeus'},
+ {id:'w3',name:'Votsala 3 Deluxe',lat:37.94801,lng:23.64301,city:'Piraeus'},
+ {id:'e1',name:'The Athenian Veranda',lat:37.9760,lng:23.7290,city:'Athens'},
+ {id:'e2',name:'The Athenian Veranda 2',lat:37.9760,lng:23.7290,city:'Athens'},
+ {id:'e3',name:'The Athenian Veranda 3',lat:37.97601,lng:23.72902,city:'Athens'},
+ {id:'n1',name:'Elysian Cornerstone',lat:40.6330,lng:22.9410,city:'Thessaloniki'},
+ {id:'n2',name:'Le Grace Urban Retreat',lat:40.6210,lng:22.9530,city:'Thessaloniki'},
+ {id:'n3',name:'Pixie Studio Athens',lat:38.0080,lng:23.7830,city:'Psichiko'},
+ {id:'c1',name:'Vista Acropolis',lat:37.9715,lng:23.7267,city:'Athens'},
+ {id:'c2',name:'The Athenian Cedar',lat:37.9838,lng:23.7275,city:'Athens'},
+ {id:'nc',name:'No Coords Studio'}
 ],bks:[
- {aptId:'w2',guestName:'Maria Konstantinidou',guests:5,checkIn:'20/08/2026',checkOut:'26/08/2026'},
+ {aptId:'w2',guestName:'Maria K.',guests:5,checkIn:'20/08/2026',checkOut:'26/08/2026'},
  {aptId:'w3',guestName:'Blocked',checkIn:'21/08/2026',checkOut:'28/08/2026'},
  {aptId:'e1',guestName:'John Smith',guests:4,checkIn:'22/08/2026',checkOut:'25/08/2026'},
- {aptId:'n2',guestName:'Anna Papadopoulou',guests:3,checkIn:'23/08/2026',checkOut:'27/08/2026'},
- {aptId:'n4',guestName:'Maintenance',checkIn:'23/08/2026',checkOut:'24/08/2026'}
+ {aptId:'c2',guestName:'Anna P.',guests:5,checkIn:'23/08/2026',checkOut:'27/08/2026'},
+ {aptId:'n3',guestName:'Maintenance',checkIn:'23/08/2026',checkOut:'24/08/2026'}
 ]};
 function showTab(n,b){}
 window.fetch=function(u){
@@ -521,36 +517,8 @@ window.fetch=function(u){
     return 'blocked';
   }
 
-  // Leaflet anchors a tooltip to its marker and lets it hang off the edge of
-  // the map. A building tooltip listing several units is wide enough that this
-  // happens often, so once it is open we nudge it back inside the container.
-  function keepTooltipInside(tooltip) {
-    if (!tooltip || !map) return;
-    var el = tooltip.getElement && tooltip.getElement();
-    var box = map.getContainer();
-    if (!el || !box) return;
-
-    // clear a previous nudge before measuring again
-    el.style.marginLeft = '';
-    el.style.marginTop = '';
-
-    // measure after the browser has laid the tooltip out
-    requestAnimationFrame(function () {
-      var t = el.getBoundingClientRect();
-      var b = box.getBoundingClientRect();
-      var pad = 8;
-      var dx = 0, dy = 0;
-
-      if (t.left < b.left + pad) dx = (b.left + pad) - t.left;
-      else if (t.right > b.right - pad) dx = (b.right - pad) - t.right;
-
-      // if it would run off the top, flip it under the pin instead
-      if (t.top < b.top + pad) dy = (t.height + 34);
-
-      if (dx) el.style.marginLeft = Math.round(dx) + 'px';
-      if (dy) el.style.marginTop = Math.round(dy) + 'px';
-    });
-  }
+  // Tooltip for one pin. A single unit reads as before; a building lists every
+  // unit at that address with its own status and capacity.
   function tooltipHtml(g, when) {
     if (g.units.length === 1) {
       var apt = g.units[0];
@@ -1100,10 +1068,21 @@ window.fetch=function(u){
       });
       marker.on('click', function () { pickForMeasure(g); });
 
+      // Open the tooltip on the side that has room. Deciding up front lets
+      // Leaflet place it normally — nudging it after it opens makes it jump.
+      var dir = 'top';
+      try {
+        var b = map.getBounds(), c = b.getCenter();
+        var latSpan = b.getNorth() - b.getSouth();
+        var lngSpan = b.getEast() - b.getWest();
+        if (g.lat > b.getNorth() - latSpan * 0.22) dir = 'bottom';   // near the top edge
+        else if (g.lng < b.getWest() + lngSpan * 0.18) dir = 'right'; // near the left edge
+        else if (g.lng > b.getEast() - lngSpan * 0.18) dir = 'left';  // near the right edge
+      } catch (e) { dir = 'top'; }
+
       marker.bindTooltip(tooltipHtml(g, when), {
-        direction: 'top', opacity: 1, className: 'amap-tooltip'
+        direction: dir, opacity: 1, className: 'amap-tooltip'
       });
-      marker.on('tooltipopen', function (ev) { keepTooltipInside(ev.tooltip); });
       marker.addTo(layer);
     });
 
