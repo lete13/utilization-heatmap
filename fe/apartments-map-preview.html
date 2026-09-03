@@ -252,28 +252,26 @@ body{margin:0;background:#f5f5f2;font-family:Inter,system-ui,-apple-system,sans-
 .amap-pickbar .amap-pick { min-width: 280px; }
 .amap-pickhint { font-size: 11.5px; color: #98a0a6; }
 
-/* ── Keep building tooltips inside the map ─────────────────────────────────
-   A tooltip listing several units is wide; cap it against the viewport and
-   let a long unit list scroll rather than run off the map. */
+/* ── Building tooltips: full information, inside the map ───────────────────
+   The tooltip is given a real width rather than a max-width so the browser
+   never collapses it into a one-letter column. Staying inside the map is
+   handled by choosing the side before opening (see apartments-map.js). */
 .leaflet-tooltip.amap-tooltip {
-  max-width: min(280px, 70vw);
   white-space: normal;
-  overflow-wrap: anywhere;
+  width: max-content;
+  max-width: none;
 }
-.amap-tip-multi { min-width: 0; width: 100%; }
-.amap-tip-units {
-  max-height: 210px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-/* a slim scrollbar so a tall building does not look broken */
+/* a single flat: let it size to its content, it is short anyway */
+.amap-tip { width: max-content; max-width: 300px; }
+/* a building: fixed comfortable width so every unit row lines up */
+.amap-tip-multi { width: 290px; max-width: 290px; }
+/* a tall building scrolls instead of running past the bottom of the map */
+.amap-tip-units { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
 .amap-tip-units::-webkit-scrollbar { width: 6px; }
 .amap-tip-units::-webkit-scrollbar-thumb { background: rgba(22,40,58,.18); border-radius: 3px; }
-.amap-tip-unit-top { flex-wrap: wrap; row-gap: 2px; }
-.amap-tip-unit-name { min-width: 0; overflow-wrap: anywhere; }
 
 </style></head><body>
-<div class="banner">PREVIEW — tooltips no longer jump: the side is chosen from the pin position before opening (left / right / below near the edges)</div>
+<div class="banner">PREVIEW — hover <b>Votsala</b> (3 units) or <b>The Athenian Veranda</b> (3 units): the box now has a proper width, shows the full information, and opens on the side that has room</div>
 <div id="tab-ops" class="tab-panel"></div>
 
 <script>
@@ -288,9 +286,9 @@ const DB={};
   DB[id]={houseRules:{maximum_guests:String(2+(i%6)),base_capacity:String(2+(i%4))}};
 });
 const S={apts:[
- {id:'w1',name:'Votsala 1 Luxury Stay',lat:37.9480,lng:23.6430,city:'Piraeus'},
- {id:'w2',name:'Votsala 2 Luxury Stay',lat:37.9480,lng:23.6430,city:'Piraeus'},
- {id:'w3',name:'Votsala 3 Deluxe',lat:37.94801,lng:23.64301,city:'Piraeus'},
+ {id:'w1',name:'Votsala 1 Luxury Stay with Patio',lat:37.9480,lng:23.6430,city:'Piraeus'},
+ {id:'w2',name:'Votsala 2 Luxury Stay with Patio',lat:37.9480,lng:23.6430,city:'Piraeus'},
+ {id:'w3',name:'Votsala 3 Deluxe Apartment',lat:37.94801,lng:23.64301,city:'Piraeus'},
  {id:'e1',name:'The Athenian Veranda',lat:37.9760,lng:23.7290,city:'Athens'},
  {id:'e2',name:'The Athenian Veranda 2',lat:37.9760,lng:23.7290,city:'Athens'},
  {id:'e3',name:'The Athenian Veranda 3',lat:37.97601,lng:23.72902,city:'Athens'},
@@ -301,10 +299,10 @@ const S={apts:[
  {id:'c2',name:'The Athenian Cedar',lat:37.9838,lng:23.7275,city:'Athens'},
  {id:'nc',name:'No Coords Studio'}
 ],bks:[
- {aptId:'w2',guestName:'Maria K.',guests:5,checkIn:'20/08/2026',checkOut:'26/08/2026'},
+ {aptId:'w2',guestName:'Maria Konstantinidou',guests:5,checkIn:'20/08/2026',checkOut:'26/08/2026'},
  {aptId:'w3',guestName:'Blocked',checkIn:'21/08/2026',checkOut:'28/08/2026'},
  {aptId:'e1',guestName:'John Smith',guests:4,checkIn:'22/08/2026',checkOut:'25/08/2026'},
- {aptId:'c2',guestName:'Anna P.',guests:5,checkIn:'23/08/2026',checkOut:'27/08/2026'},
+ {aptId:'c2',guestName:'Anna Papadopoulou',guests:5,checkIn:'23/08/2026',checkOut:'27/08/2026'},
  {aptId:'n3',guestName:'Maintenance',checkIn:'23/08/2026',checkOut:'24/08/2026'}
 ]};
 function showTab(n,b){}
