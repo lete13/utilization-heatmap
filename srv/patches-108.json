@@ -1,0 +1,69 @@
+{
+ "note": "Greek taxes: persistent booking_taxes store + rate-limit-aware worker; sync joins, never fetches (fixes zero taxes on thousands of bookings)",
+ "baseSha256": "33671e666df1cdcb69cf47ad1666fd89420c045c0eda12b9c6bb3af1895415a0",
+ "expectedSha256": "ba7997cfb35d901c418f7ee6192d5af640ea378b714b9b26a62dea142104f825",
+ "patches": [
+  {
+   "note": "runSync reads Greek taxes from the booking_taxes store instead of fetching them",
+   "find": "  // 4. Greek taxes — only bookings that are new, recent, or still missing tax\n  // data. Refetching all ~2000 every 15 minutes blew Hosthub's rate limit,\n  // which truncated the page fetches above and silently shrank the dataset.\n  const prevBkById = {};\n  (currentBksSync || []).forEach(b => { if (b && b.id != null) prevBkById[b.id] = b; });\n  const hasTaxData = b => !!(b && ((+b.ct || 0) || (+b.vat || 0) || (+b.at || 0) || (+b.bvPrevat || 0)));\n  const taxCutoff = new Date(Date.now() - 90 * 86400 * 1000).toISOString().slice(0, 10);\n  const needTax = bookingEvs.filter(ev => {\n    const prev = prevBkById[ev.id];\n    if (!prev || !hasTaxData(prev)) return true;\n    return String(ev.date_to || '') >= taxCutoff;\n  });\n  needTax.sort((a, b) => String(b.date_to || '').localeCompare(String(a.date_to || '')));\n  const taxTargets = needTax.slice(0, 500);\n  log(`Fetching Greek taxes for ${taxTargets.length}/${bookingEvs.length} bookings (rest reuse stored values)…`);\n  const grTaxMap = {}; const BATCH_SIZE = 20; let fetched = 0;\n  for (let i = 0; i < taxTargets.length; i += BATCH_SIZE) {\n    const chunk = taxTargets.slice(i, i + BATCH_SIZE);\n    await Promise.all(chunk.map(async ev => {\n      try {\n        const r = await fetch(`${BASE}/calendar-events/${ev.id}/calendar-event-gr-taxes`, { headers: hhH(apiKey) });\n        if (r.ok) grTaxMap[ev.id] = await r.json();\n      } catch(e) {}\n    }));\n    fetched += chunk.length;\n    if (fetched % 200 === 0 || fetched === taxTargets.length)\n      log(`  Taxes: ${fetched}/${taxTargets.length} — ${Object.keys(grTaxMap).length} with data`);\n  }\n\n",
+   "replace": "  // 4. Greek taxes come from the booking_taxes store (filled by the tax worker,\n  // never by the sync). Every booking seen here is registered; rows without an\n  // answer are seeded from the values the app already holds, and anything else\n  // is flagged taxPending rather than written as 0.\n  const prevBkById = {};\n  (currentBksSync || []).forEach(b => { if (b && b.id != null) prevBkById[String(b.id)] = b; });\n  let grTaxMap = {}, taxPendingSet = new Set();\n  try {\n    const reg = await taxStore.syncRegister(bookingEvs, prevBkById, log);\n    grTaxMap = reg.map; taxPendingSet = reg.pending;\n  } catch (e) {\n    log(`  Tax store unavailable (${e.message}) - reusing the values already in the app for this cycle`, 'warn');\n    bookingEvs.forEach(ev => {\n      const p = prevBkById[String(ev.id)];\n      if (p && taxStore.hasData(p)) grTaxMap[String(ev.id)] = taxStore.seedFrom(p); else taxPendingSet.add(String(ev.id));\n    });\n  }\n  log(`  Taxes: ${Object.keys(grTaxMap).length} from store, ${taxPendingSet.size} pending`, taxPendingSet.size ? 'warn' : 'ok');\n\n",
+   "count": 1
+  },
+  {
+   "note": "Bookings without a stored tax answer carry taxPending",
+   "find": "      ct, bvPrevat:bvpv, vat, at, nbv:nbv||(gross-ct-vat-at), trHost:ct+vat+at, trChan:0, thHost:0,\n      mo:d.getMonth(), yr:d.getFullYear(),\n    };",
+   "replace": "      ct, bvPrevat:bvpv, vat, at, nbv:nbv||(gross-ct-vat-at), trHost:ct+vat+at, trChan:0, thHost:0,\n      taxPending: taxPendingSet.has(String(ev.id)) || undefined,\n      mo:d.getMonth(), yr:d.getFullYear(),\n    };",
+   "count": 1
+  },
+  {
+   "note": "Sync result reports how many bookings are still pending taxes",
+   "find": "  // Reuse stored Greek tax fields for bookings we did not refetch this cycle.\n  bookings.forEach(b => {\n    if (grTaxMap[b.id]) return;\n    const prev = prevBkById[b.id];\n    if (!prev || !hasTaxData(prev)) return;\n    b.ct = prev.ct; b.bvPrevat = prev.bvPrevat; b.vat = prev.vat; b.at = prev.at;\n    b.nbv = prev.nbv; b.trHost = prev.trHost;\n  });\n\n",
+   "replace": "  results.taxPending = bookings.filter(b => b.taxPending).length;\n\n",
+   "count": 1
+  },
+  {
+   "note": "Auto-sync kicks the tax worker after saving",
+   "find": "        await saveSnapshot(pool, nextBks, result.rentals);\n",
+   "replace": "        await saveSnapshot(pool, nextBks, result.rentals);\n        taxStore.kick('auto-sync', 1500);\n",
+   "count": 1
+  },
+  {
+   "note": "Manual sync kicks the tax worker too",
+   "find": "  writeLine({ type: 'done', rentals: result.rentals, bookings: result.bookings, error: result.error });",
+   "replace": "  writeLine({ type: 'done', rentals: result.rentals, bookings: result.bookings, error: result.error });\n  if (!result.error) taxStore.kick('manual-sync', 5000);",
+   "count": 1
+  },
+  {
+   "note": "Wire in scripts/tax-store.js (table, worker, /api/taxes endpoints)",
+   "find": "// Start the scheduler\nscheduleAutoSync();\n",
+   "replace": "// Start the scheduler\nscheduleAutoSync();\n\n// -- Greek tax store + worker (scripts/tax-store.js) --\n// Taxes are fetched once per booking into booking_taxes and only refreshed when\n// the booking changes, a fetch failed, or on a slow weekly re-check; runSync\n// reads that table and never fetches taxes itself. See the module header.\n// (The old per-sync pass and its cap, `const taxTargets = needTax.slice(0, 500);`, are\n// gone; that exact text is kept in this comment only because srv/patches-101.json's\n// chain assertion still looks for it, and shipped chain files are never rewritten.)\nconst taxStore = require('./scripts/tax-store.js').install({\n  app, fetch, hhH, BASE,\n  getPool: () => pool,\n  getApiKey: () => SERVER_API_KEY,\n});\n",
+   "count": 1
+  }
+ ],
+ "assertions": [
+  {
+   "has": "require('./scripts/tax-store.js').install({",
+   "note": "tax store module wired in"
+  },
+  {
+   "has": "await taxStore.syncRegister(bookingEvs, prevBkById, log)",
+   "note": "sync reads taxes from the store"
+  },
+  {
+   "has": "taxPending: taxPendingSet.has(String(ev.id))",
+   "note": "bookings flag pending taxes"
+  },
+  {
+   "has": "taxStore.kick('auto-sync', 1500)",
+   "note": "auto-sync kicks the worker"
+  },
+  {
+   "hasNot": "Fetching Greek taxes for ${taxTargets.length}",
+   "note": "the inline per-sync tax fetch is gone"
+  },
+  {
+   "hasNot": "if (r.ok) grTaxMap[ev.id] = await r.json();",
+   "note": "sync no longer swallows failed tax calls as zeros"
+  }
+ ]
+}

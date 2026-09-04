@@ -1,0 +1,43 @@
+{
+ "note": "Taxes pending: dashboard count, report banner, fetch-now through the server tax store",
+ "baseSha256": "36aa40fa2e9ad591b9ecd0ca95ccce77a8b72a75ee469cea9599db90e04b599f",
+ "expectedSha256": "73899677fef4f725d3a32722794d2e5e4ce3d4a18fa128ee25c535dfd0ca1f4a",
+ "patches": [
+  {
+   "note": "Dashboard Data health counts reservations with taxes still pending",
+   "find": "      const ua = (S.exps || []).filter(e => !e.aptId).length;\n      if (fee || ua) {\n        cards.push(card('⚠', 'Data health', 'warn',\n          (fee ? big(fee, 'res. missing fees', 'warn') : '') + (ua ? big(ua, 'unassigned expenses', 'warn') : ''),\n          (fee ? line('Fix commissions/payment charges in Hosthub, then re-sync.') : '') + (ua ? line('Assign the expenses to properties before reports.') : ''),\n          (fee ? goBtn('bk', 'Bookings') : '') + ' ' + (ua ? goBtn('exp', 'Expenses') : '')));\n      }\n",
+   "replace": "      const ua = (S.exps || []).filter(e => !e.aptId).length;\n      const tp = (S.bks || []).filter(b => b && b.taxPending && !b.cancelled).length;\n      if (fee || ua || tp) {\n        cards.push(card('⚠', 'Data health', 'warn',\n          (fee ? big(fee, 'res. missing fees', 'warn') : '') + (ua ? big(ua, 'unassigned expenses', 'warn') : '') + (tp ? big(tp, 'res. taxes pending', 'warn') : ''),\n          (fee ? line('Fix commissions/payment charges in Hosthub, then re-sync.') : '') + (ua ? line('Assign the expenses to properties before reports.') : '') + (tp ? line('Greek taxes for these are still being fetched from Hosthub in the background and land with the next sync.') : ''),\n          (fee ? goBtn('bk', 'Bookings') : '') + ' ' + (ua ? goBtn('exp', 'Expenses') : '')));\n      }\n",
+   "count": 1
+  },
+  {
+   "note": "Reports banner when the period has reservations with pending taxes",
+   "find": "  panels.innerHTML=panelHTML;\n  window._rpt={apt,bks,exps,gea,geaVat,dates,payout,occ,nights,totalDays,panelHTML,m,selApts:_selApts,packets,cmb};",
+   "replace": "  // Taxes-pending banner (display-only): the store has no answer yet for these\n  // reservations, so VAT / climate / accommodation tax count as 0 in the math.\n  const _taxPend = (bks || []).filter(b => b && b.taxPending && !b.cancelled);\n  if (_taxPend.length) {\n    panelHTML = '<div id=\"rpt-tax-pending\" style=\"padding:12px 16px;background:#FEF3C7;border:1px solid #D97706;border-radius:var(--r);margin-bottom:12px;font-size:12.5px;color:#92400E\">'\n      +'<b>⏳ Greek taxes still pending for '+_taxPend.length+' reservation'+(_taxPend.length>1?'s':'')+' in this period.</b> '\n      +'Their VAT, climate and accommodation tax currently count as 0, so taxes are understated and the owner payout overstated until they arrive. '\n      +'They are fetched from Hosthub in the background; '\n      +'<a onclick=\"fetchGrTaxes()\" style=\"cursor:pointer;text-decoration:underline;font-weight:600\">fetch them now</a> and regenerate before sending.'\n      +'</div>' + panelHTML;\n  }\n  panels.innerHTML=panelHTML;\n  window._rpt={apt,bks,exps,gea,geaVat,dates,payout,occ,nights,totalDays,panelHTML,m,selApts:_selApts,packets,cmb};",
+   "count": 1
+  },
+  {
+   "note": "Fetch taxes now goes through the server store (/api/taxes/fetch)",
+   "find": "async function fetchGrTaxes() {\n  if (!window._rpt) { toast('Generate a report first.', 'err'); return; }\n  const apiKey = localStorage.getItem('hh_api_key');",
+   "replace": "async function fetchGrTaxes() {\n  if (!window._rpt) { toast('Generate a report first.', 'err'); return; }\n  const { bks } = window._rpt;\n  const missing = bks.filter(b => b && b.id && !String(b.id).startsWith('_') && (b.taxPending || (b.ct === 0 && b.vat === 0 && b.at === 0)));\n  if (!missing.length) { toast('All bookings already have tax data.'); return; }\n  const btn = document.getElementById('fetch-gr-btn');\n  if (btn) { btn.disabled = true; btn.innerHTML = '<i class=\"ti ti-loader\"></i> Fetching taxes…'; }\n  toast('Fetching Greek taxes for ' + missing.length + ' bookings…', '');\n  let updated = 0, note = '';\n  try {\n    const r = await fetch('/api/taxes/fetch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: missing.map(b => String(b.id)) }) });\n    const d = await r.json();\n    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));\n    const eur = m => (m && m.cents != null ? m.cents / 100 : 0);\n    Object.entries(d.results || {}).forEach(([id, t]) => {\n      const idx = S.bks.findIndex(x => x && String(x.id) === id);\n      if (idx < 0) return;\n      const ct = eur(t.climate_tax), vat = eur(t.vat), at = eur(t.accommodation_tax);\n      S.bks[idx].ct = ct; S.bks[idx].bvPrevat = eur(t.booking_value_pre_vat); S.bks[idx].vat = vat; S.bks[idx].at = at;\n      S.bks[idx].nbv = eur(t.net_value) || ((+S.bks[idx].gross || 0) - ct - vat - at); S.bks[idx].trHost = ct + vat + at;\n      delete S.bks[idx].taxPending;\n      updated++;\n    });\n    if (d.skipped) note = ' (' + d.skipped + ')';\n    else if (d.throttled) note = ' (Hosthub rate limit - the rest arrive in the background)';\n    else if (d.missing && d.missing.length) note = ' (' + d.missing.length + ' not answered yet - retried in the background)';\n  } catch (e) { toast('Tax fetch failed: ' + e.message, 'err'); }\n  if (updated) save();\n  if (btn) { btn.disabled = false; btn.innerHTML = updated ? '<i class=\"ti ti-check\"></i> Taxes loaded' : '<i class=\"ti ti-refresh\"></i> Fetch taxes'; }\n  toast('Greek taxes loaded for ' + updated + ' of ' + missing.length + ' bookings' + note + '.', updated ? 'ok' : 'err');\n  if (updated) renderRpt();\n}\nasync function _fetchGrTaxesLegacy() {\n  if (!window._rpt) { toast('Generate a report first.', 'err'); return; }\n  const apiKey = localStorage.getItem('hh_api_key');",
+   "count": 1
+  }
+ ],
+ "assertions": [
+  {
+   "has": "big(tp, 'res. taxes pending', 'warn')",
+   "note": "dashboard shows pending-tax count"
+  },
+  {
+   "has": "id=\"rpt-tax-pending\"",
+   "note": "report banner for pending taxes"
+  },
+  {
+   "has": "fetch('/api/taxes/fetch'",
+   "note": "fetch-now uses the server store"
+  },
+  {
+   "has": "async function _fetchGrTaxesLegacy()",
+   "note": "legacy loop kept, no longer wired"
+  }
+ ]
+}

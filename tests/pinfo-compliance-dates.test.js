@@ -57,8 +57,8 @@ assert.strictEqual(fe142.baseSha256, fe141.expectedSha256, 'FE 142 continues FE 
 
 const fe = applyKind('fe');
 const srv = applyKind('srv');
-assert.strictEqual(fe.last, 'patches-142.json', 'FE 142 is the tip of the chain');
-assert.strictEqual(srv.last, 'patches-107.json', 'SRV 107 is the tip of the chain');
+assert.strictEqual(fe.last, 'patches-143.json', 'FE 143 is the tip of the chain');
+assert.strictEqual(srv.last, 'patches-108.json', 'SRV 108 is the tip of the chain');
 
 assert(fe.src.includes('function _pinfoAddMonthsISO(iso, months)'), 'calendar-safe due date helper');
 assert(fe.src.includes('_pinfoSaveSoon()'), 'dates persist without waiting for Save');
